@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/card";
 import { signIn } from "@/lib/auth/actions";
 
-export const metadata: Metadata = { title: "Sign in · journal4me" };
+export const metadata: Metadata = { title: "Sign in" };
 
 export default function SignInPage() {
   return (

@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/card";
 import { signUp } from "@/lib/auth/actions";
 
-export const metadata: Metadata = { title: "Create account · journal4me" };
+export const metadata: Metadata = { title: "Create account" };
 
 export default function SignUpPage() {
   return (

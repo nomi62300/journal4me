@@ -4,6 +4,59 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] — 2026-09-02
+
+### Added — M2: Accounts UI + onboarding wizard
+- App shell: desktop sidebar + persistent header, mobile bottom tab bar (5 curated items,
+  `env(safe-area-inset-bottom)` padding for the PWA home indicator). Unbuilt sections
+  render with a "soon" badge rather than a dead link, so the app's shape is visible
+  without shipping 404s.
+- `/accounts` — list page, cards showing live balance via `account_balance()`, archived
+  section, empty state.
+- `/accounts/new` — a 4-step onboarding wizard (Type → Details → Trading day → Review),
+  entitlement-aware from the first step. Deliberately captures only what the current
+  schema supports; phase/withdrawal-rule capture is explicitly out of scope until the
+  rule engine (M6) exists, and the wizard says so on the firm step rather than pretending.
+- `/accounts/[id]` — detail view, inline edit form, archive/unarchive, delete (behind a
+  confirmation dialog — irreversible, unlike archive).
+- `TimezoneCombobox` — searchable picker sourced from the runtime's own
+  `Intl.supportedValuesOf('timeZone')`, so it only ever offers names the database's own
+  `prop.is_valid_timezone()` would accept.
+- Root layout: `next-themes` provider (dark mode was already tokenized in `globals.css`
+  but nothing rendered it), `sonner` toaster, proper `journal4me` metadata/title template.
+
+### Fixed — five real bugs, all found live, none caught by `tsc`/build/lint
+1. **Editing any account was completely broken.** `parseAccountForm` was shared between
+   create and update and unconditionally required `account_type` — but the edit form
+   correctly never renders that control (it's immutable; see the quota-bypass note in
+   v0.12.0). Every save failed with a generic "Check the highlighted fields." and no
+   visible reason. Root-cause fixed with a dedicated `accountUpdateSchema` that omits the
+   field entirely, rather than patching the symptom by smuggling the old value back in as
+   a hidden input.
+2. **Timezone search silently failed for the most natural query.** Typing "New York"
+   returned "No timezone found" because cmdk filters against the raw IANA id
+   (`America/New_York`, underscore and all) — nobody types the underscore. Fixed with
+   cmdk's own `keywords` prop rather than a custom filter function.
+3. **The starting-balance field concatenated instead of replacing.** It defaults to a
+   real `0`, so clicking in and typing appended — "100000" typed into a field showing "0"
+   became "0100000". Fixed with select-on-focus, the standard pattern for a numeric field
+   with a live default.
+4. **A wizard step-1 gap**: cards show as disabled when a plan limit is hit, but nothing
+   stopped clicking "Next" past a disabled default selection — a user could fill out all
+   4 steps and only discover the problem as a generic server error at final submit. `Next`
+   now checks the same limit the cards already display and blocks with the same message.
+5. A `SuccessToast` helper called `toast()` and `setState` during render rather than in
+   `useEffect` — unsafe under React's render-may-run-twice guarantee (StrictMode
+   double-invokes). Fixed before it shipped, caught by re-reading the diff rather than by
+   a symptom.
+
+### Verified live
+Full wizard flow (all 4 steps, both account types, validation, entitlement gating),
+list page, edit-and-persist, archive/unarchive, delete-with-confirmation-and-redirect,
+and the entitlement-blocked wizard state — all exercised against a real local Supabase
+instance, not asserted from a passing build. Confirmed at 375px: bottom nav, wizard cards
+and buttons all render with no horizontal scroll and full-size touch targets.
+
 ## [0.12.0] — 2026-09-02
 
 ### Added

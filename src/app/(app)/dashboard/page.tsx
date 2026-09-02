@@ -11,7 +11,7 @@ import {
 import { signOut } from "@/lib/auth/actions";
 import { requireUser } from "@/lib/auth/session";
 
-export const metadata: Metadata = { title: "Dashboard · journal4me" };
+export const metadata: Metadata = { title: "Dashboard" };
 
 export default async function DashboardPage() {
   const user = await requireUser();
