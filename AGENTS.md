@@ -47,6 +47,12 @@ personal and prop-firm accounts. See `docs/build-plan.md` for the full plan and
   values.
 - Schema changes go through `supabase/migrations/*.sql` only — never the Studio UI, which
   does not exist in the self-hosted stack we migrate to.
+- **`supabase/config.toml` does NOT apply to the hosted project until you run
+  `supabase config push`.** It configures the *local* stack only. This was found the hard
+  way: `enable_confirmations = false` sat in the file while the hosted project still had
+  confirmations on, so the first real sign-up tried to send mail and died on
+  `email rate limit exceeded` (the free tier allows 2/hour). After changing any auth
+  setting, push it and verify against the live project.
 
 ## Next.js 16 (not 15 — read `node_modules/next/dist/docs/` before writing framework code)
 
