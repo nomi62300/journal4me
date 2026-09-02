@@ -1,21 +1,15 @@
 import Link from "next/link";
-import { Archive, ArchiveRestore, Landmark, TrendingUp } from "lucide-react";
+import { Landmark, TrendingUp } from "lucide-react";
 
+import { ArchiveAccountControl } from "@/components/accounts/archive-account-control";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { setAccountArchived } from "@/lib/accounts/actions";
 import type { AccountWithBalance } from "@/lib/accounts/types";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export function AccountCard({ account }: { account: AccountWithBalance }) {
   const Icon = account.account_type === "prop_firm" ? Landmark : TrendingUp;
-  const toggleArchived = setAccountArchived.bind(
-    null,
-    account.id,
-    !account.is_archived,
-  );
 
   return (
     <Card className={cn(account.is_archived && "opacity-60")}>
@@ -43,21 +37,12 @@ export function AccountCard({ account }: { account: AccountWithBalance }) {
           </div>
         </Link>
 
-        <form action={toggleArchived}>
-          <Button
-            type="submit"
-            variant="ghost"
-            size="icon"
-            title={account.is_archived ? "Unarchive" : "Archive"}
-            className="text-muted-foreground shrink-0"
-          >
-            {account.is_archived ? (
-              <ArchiveRestore className="size-4" />
-            ) : (
-              <Archive className="size-4" />
-            )}
-          </Button>
-        </form>
+        <ArchiveAccountControl
+          accountId={account.id}
+          accountType={account.account_type}
+          isArchived={account.is_archived}
+          variant="icon"
+        />
       </CardContent>
     </Card>
   );

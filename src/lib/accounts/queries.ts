@@ -48,6 +48,26 @@ export async function getAccount(
   return withBalance;
 }
 
+/**
+ * Realised P&L for this account's CURRENT trading day, via account_today_pnl
+ * (reuses prop.trading_day server-side — see the wizard-v2 migration — so
+ * "today" always agrees with how trades are bucketed elsewhere). Feeds the
+ * daily-loss-limit proximity indicator only; null on any error rather than
+ * throwing, since this is a secondary, non-blocking read for the account
+ * detail page.
+ */
+export async function getAccountTodayPnl(accountId: number): Promise<number | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("account_today_pnl", {
+    p_account_id: accountId,
+  });
+  if (error) {
+    console.error("[accounts] getAccountTodayPnl failed", accountId, error);
+    return null;
+  }
+  return data as number;
+}
+
 async function attachBalances(
   supabase: Awaited<ReturnType<typeof createClient>>,
   accounts: Account[],

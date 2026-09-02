@@ -18,15 +18,15 @@
  * challenge_instances, which do not exist yet — that is the rule engine
  * (M6), deliberately much harder work (versioned profiles, drawdown
  * variants, phase topology) than an accounts CRUD milestone should absorb.
- * This wizard captures everything the CURRENT schema supports and says so
- * plainly on the firm step, rather than pretending to capture rules it has
- * nowhere to put.
+ * challenge_type and the daily/max loss-limit fields below are lightweight
+ * labels/thresholds this schema DOES support (see the wizard-v2 migration) —
+ * still not the rule engine, and each field says so where it matters.
  */
 
 import { useState, useTransition } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 import { z } from "zod";
 
@@ -55,14 +55,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { AssetClassToggles } from "@/components/accounts/asset-class-toggles";
+import { LossLimitField } from "@/components/accounts/loss-limit-field";
+import { PickOrOtherField } from "@/components/accounts/pick-or-other-field";
 import { TimezoneCombobox } from "@/components/accounts/timezone-combobox";
 import { createAccount } from "@/lib/accounts/actions";
 import { isAtLimit, type PlanLimit } from "@/lib/accounts/limits";
 import { accountSchema } from "@/lib/accounts/schema";
 import {
+  CHALLENGE_TYPES,
   COMMON_BROKER_PLATFORMS,
   COMMON_PROP_FIRMS,
-  PRIMARY_MARKETS,
+  CURRENCY_OPTIONS,
+  NEEDS_CONSISTENCY_RULE,
+  PHASES_FOR_CHALLENGE_TYPE,
+  type ChallengeType,
 } from "@/lib/accounts/types";
 import { cn } from "@/lib/utils";
 
@@ -85,8 +92,19 @@ const STEPS = ["Type", "Details", "Trading day", "Review"] as const;
 // getting there.
 const STEP_FIELDS: (keyof WizardInput)[][] = [
   ["account_type"],
-  ["name", "broker_platform", "prop_firm_name", "primary_market"],
-  ["starting_balance", "currency", "reset_timezone", "reset_time"],
+  ["name", "broker_platform", "prop_firm_name", "challenge_type", "asset_classes"],
+  [
+    "starting_balance",
+    "currency",
+    "reset_timezone",
+    "reset_time",
+    "daily_loss_limit_value",
+    "max_loss_limit_value",
+    "consistency_rule_pct",
+    "phase_1_profit_target_value",
+    "phase_2_profit_target_value",
+    "phase_3_profit_target_value",
+  ],
   [],
 ];
 
@@ -110,16 +128,32 @@ export function AccountWizard({ entitlements }: { entitlements: Entitlements }) 
       name: "",
       broker_platform: "",
       prop_firm_name: "",
-      primary_market: "",
+      challenge_type: "",
+      asset_classes: [],
       starting_balance: 0,
       currency: "USD",
       reset_timezone: detectBrowserTimezone(),
       reset_time: "00:00",
       day_label_offset: 0,
+      daily_loss_limit_type: "",
+      daily_loss_limit_value: "",
+      max_loss_limit_type: "",
+      max_loss_limit_value: "",
+      consistency_rule_pct: "",
+      phase_1_profit_target_type: "",
+      phase_1_profit_target_value: "",
+      phase_2_profit_target_type: "",
+      phase_2_profit_target_value: "",
+      phase_3_profit_target_type: "",
+      phase_3_profit_target_value: "",
     },
   });
 
   const accountType = form.watch("account_type");
+  const isProp = accountType === "prop_firm";
+  const challengeType = form.watch("challenge_type") as ChallengeType | "" | undefined;
+  const relevantPhases = challengeType ? PHASES_FOR_CHALLENGE_TYPE[challengeType] : [];
+  const needsConsistency = challengeType ? NEEDS_CONSISTENCY_RULE[challengeType] : false;
   const personalAtCap = isAtLimit(
     entitlements.counts.personal,
     entitlements.limits.personal,
@@ -157,12 +191,42 @@ export function AccountWizard({ entitlements }: { entitlements: Entitlements }) 
     fd.set("account_type", values.account_type);
     fd.set("broker_platform", values.broker_platform ?? "");
     fd.set("prop_firm_name", values.prop_firm_name ?? "");
-    fd.set("primary_market", values.primary_market ?? "");
+    fd.set("challenge_type", values.challenge_type ?? "");
+    for (const a of values.asset_classes) fd.append("asset_classes", a);
     fd.set("starting_balance", String(values.starting_balance));
     fd.set("currency", values.currency);
     fd.set("reset_timezone", values.reset_timezone);
     fd.set("reset_time", values.reset_time);
     fd.set("day_label_offset", String(values.day_label_offset));
+    fd.set("daily_loss_limit_type", values.daily_loss_limit_type ?? "");
+    fd.set(
+      "daily_loss_limit_value",
+      values.daily_loss_limit_value === "" || values.daily_loss_limit_value === undefined
+        ? ""
+        : String(values.daily_loss_limit_value),
+    );
+    fd.set("max_loss_limit_type", values.max_loss_limit_type ?? "");
+    fd.set(
+      "max_loss_limit_value",
+      values.max_loss_limit_value === "" || values.max_loss_limit_value === undefined
+        ? ""
+        : String(values.max_loss_limit_value),
+    );
+    fd.set(
+      "consistency_rule_pct",
+      values.consistency_rule_pct === "" || values.consistency_rule_pct === undefined
+        ? ""
+        : String(values.consistency_rule_pct),
+    );
+    for (const n of [1, 2, 3] as const) {
+      const type = values[`phase_${n}_profit_target_type`];
+      const value = values[`phase_${n}_profit_target_value`];
+      fd.set(`phase_${n}_profit_target_type`, type ?? "");
+      fd.set(
+        `phase_${n}_profit_target_value`,
+        value === "" || value === undefined ? "" : String(value),
+      );
+    }
 
     startTransition(async () => {
       // createAccount redirects on success, which surfaces as a thrown
@@ -242,9 +306,7 @@ export function AccountWizard({ entitlements }: { entitlements: Entitlements }) 
                 <FieldLabel htmlFor="w-name">Account name</FieldLabel>
                 <Input
                   id="w-name"
-                  placeholder={
-                    accountType === "prop_firm" ? "FTMO 100k #1" : "Main FX account"
-                  }
+                  placeholder={isProp ? "FTMO 100k #1" : "Main FX account"}
                   {...form.register("name")}
                   aria-invalid={!!form.formState.errors.name}
                 />
@@ -253,72 +315,92 @@ export function AccountWizard({ entitlements }: { entitlements: Entitlements }) 
                 ) : null}
               </Field>
 
-              {accountType === "prop_firm" ? (
-                <Field>
-                  <FieldLabel htmlFor="w-firm">Firm</FieldLabel>
-                  <Input
-                    id="w-firm"
-                    list="prop-firm-options"
-                    placeholder="FTMO, Apex, Topstep…"
-                    {...form.register("prop_firm_name")}
-                  />
-                  <datalist id="prop-firm-options">
-                    {COMMON_PROP_FIRMS.map((f) => (
-                      <option key={f} value={f} />
-                    ))}
-                  </datalist>
-                  <FieldDescription>
-                    A label only, for now — phase progress and rule tracking
-                    for your firm are coming in a later update.
-                  </FieldDescription>
-                </Field>
+              {isProp ? (
+                <>
+                  <Field>
+                    <FieldLabel htmlFor="w-firm">Firm</FieldLabel>
+                    <Input
+                      id="w-firm"
+                      list="prop-firm-options"
+                      placeholder="FTMO, Apex, Topstep…"
+                      {...form.register("prop_firm_name")}
+                    />
+                    <datalist id="prop-firm-options">
+                      {COMMON_PROP_FIRMS.map((f) => (
+                        <option key={f} value={f} />
+                      ))}
+                    </datalist>
+                    <FieldDescription>
+                      A label only, for now — phase progress and rule tracking
+                      for your firm are coming in a later update.
+                    </FieldDescription>
+                  </Field>
+
+                  <Field data-invalid={!!form.formState.errors.challenge_type}>
+                    <FieldLabel htmlFor="w-challenge-type">
+                      Type of account
+                    </FieldLabel>
+                    <Select
+                      value={form.watch("challenge_type") || undefined}
+                      onValueChange={(v) =>
+                        form.setValue("challenge_type", v as never, {
+                          shouldValidate: true,
+                        })
+                      }
+                    >
+                      <SelectTrigger
+                        id="w-challenge-type"
+                        className="w-full"
+                        aria-invalid={!!form.formState.errors.challenge_type}
+                      >
+                        <SelectValue placeholder="Instant, 1/2/3 phase…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CHALLENGE_TYPES.map((c) => (
+                          <SelectItem key={c.value} value={c.value}>
+                            {c.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {form.formState.errors.challenge_type ? (
+                      <FieldError errors={[form.formState.errors.challenge_type]} />
+                    ) : null}
+                  </Field>
+                </>
               ) : null}
 
-              <Field>
-                <FieldLabel htmlFor="w-platform">
-                  Broker / platform{" "}
-                  <span className="text-muted-foreground font-normal">
-                    (optional)
-                  </span>
-                </FieldLabel>
-                <Input
+              <Field data-invalid={!!form.formState.errors.broker_platform}>
+                <FieldLabel htmlFor="w-platform">Trading platform</FieldLabel>
+                <PickOrOtherField
                   id="w-platform"
-                  list="broker-platform-options"
-                  placeholder="MT5, Bybit, cTrader…"
-                  {...form.register("broker_platform")}
+                  value={form.watch("broker_platform")}
+                  onChange={(v) =>
+                    form.setValue("broker_platform", v, { shouldValidate: true })
+                  }
+                  options={COMMON_BROKER_PLATFORMS.filter((p) => p !== "Other")}
+                  placeholder="Select your platform…"
+                  otherPlaceholder="Name your platform"
                 />
-                <datalist id="broker-platform-options">
-                  {COMMON_BROKER_PLATFORMS.map((p) => (
-                    <option key={p} value={p} />
-                  ))}
-                </datalist>
+                {form.formState.errors.broker_platform ? (
+                  <FieldError errors={[form.formState.errors.broker_platform]} />
+                ) : null}
               </Field>
 
               <Field>
-                <FieldLabel htmlFor="w-market">
-                  Primary market{" "}
+                <FieldLabel>
+                  Assets to trade on this account{" "}
                   <span className="text-muted-foreground font-normal">
                     (optional)
                   </span>
                 </FieldLabel>
-                <Select
-                  value={form.watch("primary_market") || undefined}
-                  onValueChange={(v) => form.setValue("primary_market", v as never)}
-                >
-                  <SelectTrigger id="w-market" className="w-full">
-                    <SelectValue placeholder="No preference" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PRIMARY_MARKETS.map((m) => (
-                      <SelectItem key={m.value} value={m.value}>
-                        {m.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <AssetClassToggles
+                  value={form.watch("asset_classes") ?? []}
+                  onChange={(v) => form.setValue("asset_classes", v)}
+                />
                 <FieldDescription>
                   A grouping hint — every trade still records its own asset
-                  class.
+                  class. Pick as many as apply, or none.
                 </FieldDescription>
               </Field>
             </FieldGroup>
@@ -350,12 +432,16 @@ export function AccountWizard({ entitlements }: { entitlements: Entitlements }) 
                 </Field>
                 <Field data-invalid={!!form.formState.errors.currency}>
                   <FieldLabel htmlFor="w-currency">Currency</FieldLabel>
-                  <Input
+                  <PickOrOtherField
                     id="w-currency"
-                    maxLength={3}
-                    className="uppercase"
-                    {...form.register("currency")}
-                    aria-invalid={!!form.formState.errors.currency}
+                    value={form.watch("currency")}
+                    onChange={(v) =>
+                      form.setValue("currency", v.toUpperCase(), {
+                        shouldValidate: true,
+                      })
+                    }
+                    options={CURRENCY_OPTIONS}
+                    otherPlaceholder="e.g. AUD, JPY, USDC"
                   />
                   {form.formState.errors.currency ? (
                     <FieldError errors={[form.formState.errors.currency]} />
@@ -366,11 +452,22 @@ export function AccountWizard({ entitlements }: { entitlements: Entitlements }) 
               <Field data-invalid={!!form.formState.errors.reset_timezone}>
                 <FieldLabel>When does your trading day reset?</FieldLabel>
                 <FieldDescription>
-                  Prop firm daily-loss limits reset at the FIRM&rsquo;s clock,
-                  not yours. We&rsquo;ve guessed your own timezone as a
-                  starting point —{" "}
-                  <strong>check your firm&rsquo;s rules or platform</strong>{" "}
-                  for the real reset time before relying on this.
+                  {isProp ? (
+                    <>
+                      Your firm&rsquo;s daily-loss limits reset at THEIR
+                      clock, not yours. We&rsquo;ve guessed your own timezone
+                      as a starting point —{" "}
+                      <strong>check your firm&rsquo;s rules or platform</strong>{" "}
+                      for the real reset time before relying on this.
+                    </>
+                  ) : (
+                    <>
+                      This decides which calendar day a trade counts toward in
+                      your journal. We&rsquo;ve guessed your own timezone —
+                      change it if your broker&rsquo;s server runs on a
+                      different one.
+                    </>
+                  )}
                 </FieldDescription>
                 <div className="mt-1 grid grid-cols-[1fr_auto] gap-2">
                   <TimezoneCombobox
@@ -419,6 +516,136 @@ export function AccountWizard({ entitlements }: { entitlements: Entitlements }) 
                   for futures-style firms with an evening reset.
                 </FieldDescription>
               </Field>
+
+              <Field data-invalid={!!form.formState.errors.daily_loss_limit_value}>
+                <FieldLabel htmlFor="w-daily-limit">
+                  {isProp ? "Daily drawdown limit" : "Daily loss limit"}{" "}
+                  <span className="text-muted-foreground font-normal">
+                    (optional)
+                  </span>
+                </FieldLabel>
+                <LossLimitField
+                  id="w-daily-limit"
+                  type={form.watch("daily_loss_limit_type") ?? ""}
+                  value={String(form.watch("daily_loss_limit_value") ?? "")}
+                  onTypeChange={(v) =>
+                    form.setValue("daily_loss_limit_type", v, { shouldValidate: true })
+                  }
+                  onValueChange={(v) =>
+                    form.setValue("daily_loss_limit_value", v as never, {
+                      shouldValidate: true,
+                    })
+                  }
+                />
+                {form.formState.errors.daily_loss_limit_value ? (
+                  <FieldError errors={[form.formState.errors.daily_loss_limit_value]} />
+                ) : (
+                  <FieldDescription>
+                    We&rsquo;ll show how close you are to this, computed from
+                    your logged trades. No push alerts yet.
+                  </FieldDescription>
+                )}
+              </Field>
+
+              <Field data-invalid={!!form.formState.errors.max_loss_limit_value}>
+                <FieldLabel htmlFor="w-max-limit">
+                  {isProp ? "Max drawdown limit" : "Max loss limit"}{" "}
+                  <span className="text-muted-foreground font-normal">
+                    (optional)
+                  </span>
+                </FieldLabel>
+                <LossLimitField
+                  id="w-max-limit"
+                  type={form.watch("max_loss_limit_type") ?? ""}
+                  value={String(form.watch("max_loss_limit_value") ?? "")}
+                  onTypeChange={(v) =>
+                    form.setValue("max_loss_limit_type", v, { shouldValidate: true })
+                  }
+                  onValueChange={(v) =>
+                    form.setValue("max_loss_limit_value", v as never, {
+                      shouldValidate: true,
+                    })
+                  }
+                />
+                {form.formState.errors.max_loss_limit_value ? (
+                  <FieldError errors={[form.formState.errors.max_loss_limit_value]} />
+                ) : (
+                  <FieldDescription>
+                    Measured from your starting balance — a static floor, not
+                    a trailing high-water mark.
+                  </FieldDescription>
+                )}
+              </Field>
+
+              {isProp && relevantPhases.length > 0
+                ? relevantPhases.map((n) => {
+                    const typeField = `phase_${n}_profit_target_type` as const;
+                    const valueField = `phase_${n}_profit_target_value` as const;
+                    const errorField = form.formState.errors[valueField];
+                    return (
+                      <Field key={n} data-invalid={!!errorField}>
+                        <FieldLabel htmlFor={`w-phase-${n}-target`}>
+                          {relevantPhases.length > 1
+                            ? `Phase ${n} profit target`
+                            : "Profit target"}{" "}
+                          <span className="text-muted-foreground font-normal">
+                            (optional)
+                          </span>
+                        </FieldLabel>
+                        <LossLimitField
+                          id={`w-phase-${n}-target`}
+                          type={form.watch(typeField) ?? ""}
+                          value={String(form.watch(valueField) ?? "")}
+                          onTypeChange={(v) =>
+                            form.setValue(typeField, v, { shouldValidate: true })
+                          }
+                          onValueChange={(v) =>
+                            form.setValue(valueField, v as never, {
+                              shouldValidate: true,
+                            })
+                          }
+                        />
+                        {errorField ? (
+                          <FieldError errors={[errorField]} />
+                        ) : null}
+                      </Field>
+                    );
+                  })
+                : null}
+
+              {isProp && needsConsistency ? (
+                <Field data-invalid={!!form.formState.errors.consistency_rule_pct}>
+                  <FieldLabel htmlFor="w-consistency">
+                    Consistency rule{" "}
+                    <span className="text-muted-foreground font-normal">
+                      (optional)
+                    </span>
+                  </FieldLabel>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="w-consistency"
+                      type="number"
+                      inputMode="decimal"
+                      step="0.1"
+                      min="0"
+                      max="100"
+                      placeholder="e.g. 30"
+                      className="w-28"
+                      {...form.register("consistency_rule_pct")}
+                    />
+                    <span className="text-muted-foreground text-sm">
+                      % of total profit, max in a single day
+                    </span>
+                  </div>
+                  {form.formState.errors.consistency_rule_pct ? (
+                    <FieldError errors={[form.formState.errors.consistency_rule_pct]} />
+                  ) : (
+                    <FieldDescription>
+                      For a valid withdrawal — most firms use around 30%.
+                    </FieldDescription>
+                  )}
+                </Field>
+              ) : null}
             </FieldGroup>
           )}
 
@@ -447,9 +674,8 @@ export function AccountWizard({ entitlements }: { entitlements: Entitlements }) 
                 <ArrowRight className="size-4" />
               </Button>
             ) : (
-              <Button type="submit" disabled={pending} className="gap-1">
-                {pending ? <Loader2 className="size-4 animate-spin" /> : null}
-                Create account
+              <Button type="submit" disabled={pending}>
+                {pending ? "Creating…" : "Create account"}
               </Button>
             )}
           </div>
@@ -495,22 +721,72 @@ function TypeCard({
   );
 }
 
+function formatLossLimit(
+  type: string | undefined,
+  value: number | "" | undefined,
+  currency: string,
+): string | null {
+  if (!type || value === "" || value === undefined) return null;
+  return type === "percent" ? `${value}%` : `${value} ${currency}`;
+}
+
 function ReviewStep({ values }: { values: WizardInput }) {
+  const challengeLabel = CHALLENGE_TYPES.find(
+    (c) => c.value === values.challenge_type,
+  )?.label;
+  // z.input of a z.coerce.number() field is `unknown` by zod's own design
+  // (coerce accepts any input prior to coercing it) — the cast below just
+  // names what the value actually is at runtime, guaranteed by RHF +
+  // zodResolver, not a bypass of a real check.
+  const dailyLimit = formatLossLimit(
+    values.daily_loss_limit_type,
+    values.daily_loss_limit_value as number | "" | undefined,
+    values.currency,
+  );
+  const maxLimit = formatLossLimit(
+    values.max_loss_limit_type,
+    values.max_loss_limit_value as number | "" | undefined,
+    values.currency,
+  );
+  const phaseTargetRows: (readonly [string, string])[] = [];
+  for (const n of [1, 2, 3] as const) {
+    const label: string = `Phase ${n} profit target`;
+    const formatted = formatLossLimit(
+      values[`phase_${n}_profit_target_type`],
+      values[`phase_${n}_profit_target_value`] as number | "" | undefined,
+      values.currency,
+    );
+    if (formatted) phaseTargetRows.push([label, formatted]);
+  }
+  const consistency =
+    values.consistency_rule_pct === "" || values.consistency_rule_pct === undefined
+      ? null
+      : `${values.consistency_rule_pct as number}% max/day`;
+
   const rows: (readonly [string, string])[] = [
     ["Type", values.account_type === "prop_firm" ? "Prop firm" : "Personal"],
     ["Name", values.name],
     ...(values.prop_firm_name ? ([["Firm", values.prop_firm_name]] as const) : []),
+    ...(challengeLabel ? ([["Account type", challengeLabel]] as const) : []),
     ...(values.broker_platform
-      ? ([["Broker / platform", values.broker_platform]] as const)
+      ? ([["Trading platform", values.broker_platform]] as const)
       : []),
-    ...(values.primary_market
-      ? ([["Primary market", values.primary_market]] as const)
+    ...((values.asset_classes ?? []).length
+      ? ([["Assets to trade", (values.asset_classes ?? []).join(", ")]] as const)
       : []),
     [
       "Starting balance",
       `${Number(values.starting_balance).toLocaleString()} ${values.currency}`,
     ],
     ["Trading day reset", `${values.reset_time} ${values.reset_timezone}`],
+    ...(dailyLimit
+      ? ([[values.account_type === "prop_firm" ? "Daily drawdown limit" : "Daily loss limit", dailyLimit]] as const)
+      : []),
+    ...(maxLimit
+      ? ([[values.account_type === "prop_firm" ? "Max drawdown limit" : "Max loss limit", maxLimit]] as const)
+      : []),
+    ...phaseTargetRows,
+    ...(consistency ? ([["Consistency rule", consistency]] as const) : []),
   ];
 
   return (

@@ -11,7 +11,7 @@
  * also resets Radix <Select>'s internal hidden native <select>, and that
  * reset propagates back through onValueChange and genuinely clears
  * controlled state too. Found live on this exact form: the Primary Market
- * select held its value, submitted correctly on a failing attempt, then
+ * select held its value, submitted it correctly on a failing attempt, then
  * failed on itself on the very next attempt with no user interaction on it
  * at all. Avoiding the action-prop binding is what actually fixes it.
  */
@@ -36,14 +36,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { AssetClassToggles } from "@/components/accounts/asset-class-toggles";
+import { LossLimitField } from "@/components/accounts/loss-limit-field";
+import { PickOrOtherField } from "@/components/accounts/pick-or-other-field";
 import { TimezoneCombobox } from "@/components/accounts/timezone-combobox";
 import { updateAccount } from "@/lib/accounts/actions";
 import type { AccountFormState } from "@/lib/accounts/schema";
 import {
+  CHALLENGE_TYPES,
   COMMON_BROKER_PLATFORMS,
   COMMON_PROP_FIRMS,
-  PRIMARY_MARKETS,
+  CURRENCY_OPTIONS,
+  NEEDS_CONSISTENCY_RULE,
+  PHASES_FOR_CHALLENGE_TYPE,
   type Account,
+  type AssetClass,
+  type ChallengeType,
+  type LossLimitType,
 } from "@/lib/accounts/types";
 import { formatResetTime } from "@/lib/format";
 
@@ -55,31 +64,99 @@ export function AccountEditForm({ account }: { account: Account }) {
   >(updateForThisAccount, {});
   const [transitionPending, startTransition] = useTransition();
   const pending = actionPending || transitionPending;
+  const isProp = account.account_type === "prop_firm";
 
   const [name, setName] = useState(account.name);
   const [propFirmName, setPropFirmName] = useState(account.prop_firm_name ?? "");
+  const [challengeType, setChallengeType] = useState(account.challenge_type ?? "");
   const [brokerPlatform, setBrokerPlatform] = useState(account.broker_platform ?? "");
+  const [assetClasses, setAssetClasses] = useState<AssetClass[]>(account.asset_classes);
   const [startingBalance, setStartingBalance] = useState(String(account.starting_balance));
   const [currency, setCurrency] = useState(account.currency);
   const [timezone, setTimezone] = useState(account.reset_timezone);
   const [resetTime, setResetTime] = useState(formatResetTime(account.reset_time));
   const [offset, setOffset] = useState<string>(String(account.day_label_offset));
-  const [market, setMarket] = useState(account.primary_market ?? "");
+  const [dailyType, setDailyType] = useState<LossLimitType | "">(
+    account.daily_loss_limit_type ?? "",
+  );
+  const [dailyValue, setDailyValue] = useState(
+    account.daily_loss_limit_value === null ? "" : String(account.daily_loss_limit_value),
+  );
+  const [maxType, setMaxType] = useState<LossLimitType | "">(
+    account.max_loss_limit_type ?? "",
+  );
+  const [maxValue, setMaxValue] = useState(
+    account.max_loss_limit_value === null ? "" : String(account.max_loss_limit_value),
+  );
+  const [consistencyPct, setConsistencyPct] = useState(
+    account.consistency_rule_pct === null ? "" : String(account.consistency_rule_pct),
+  );
+  const [phase1Type, setPhase1Type] = useState<LossLimitType | "">(
+    account.phase_1_profit_target_type ?? "",
+  );
+  const [phase1Value, setPhase1Value] = useState(
+    account.phase_1_profit_target_value === null ? "" : String(account.phase_1_profit_target_value),
+  );
+  const [phase2Type, setPhase2Type] = useState<LossLimitType | "">(
+    account.phase_2_profit_target_type ?? "",
+  );
+  const [phase2Value, setPhase2Value] = useState(
+    account.phase_2_profit_target_value === null ? "" : String(account.phase_2_profit_target_value),
+  );
+  const [phase3Type, setPhase3Type] = useState<LossLimitType | "">(
+    account.phase_3_profit_target_type ?? "",
+  );
+  const [phase3Value, setPhase3Value] = useState(
+    account.phase_3_profit_target_value === null ? "" : String(account.phase_3_profit_target_value),
+  );
+  const [challengeTypeError, setChallengeTypeError] = useState<string | null>(null);
+
+  const relevantPhases = challengeType
+    ? PHASES_FOR_CHALLENGE_TYPE[challengeType as ChallengeType]
+    : [];
+  const needsConsistency = challengeType
+    ? NEEDS_CONSISTENCY_RULE[challengeType as ChallengeType]
+    : false;
 
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
+        // challenge_type is compulsory for a prop firm account (owner's
+        // spec), but this check can't live in accountUpdateSchema — that
+        // schema omits account_type entirely (it's immutable, see the
+        // comment on accountUpdateSchema), so the server side has no way to
+        // know "is this a prop firm account" from the update payload alone.
+        // Enforced here instead, where account.account_type is already
+        // known from the page's own data.
+        if (isProp && !challengeType) {
+          setChallengeTypeError("Pick the type of account.");
+          return;
+        }
+        setChallengeTypeError(null);
+
         const fd = new FormData();
         fd.set("name", name);
         fd.set("prop_firm_name", propFirmName);
+        fd.set("challenge_type", challengeType);
         fd.set("broker_platform", brokerPlatform);
+        for (const a of assetClasses) fd.append("asset_classes", a);
         fd.set("starting_balance", startingBalance);
         fd.set("currency", currency);
         fd.set("reset_timezone", timezone);
         fd.set("reset_time", resetTime);
         fd.set("day_label_offset", offset);
-        fd.set("primary_market", market);
+        fd.set("daily_loss_limit_type", dailyType);
+        fd.set("daily_loss_limit_value", dailyValue);
+        fd.set("max_loss_limit_type", maxType);
+        fd.set("max_loss_limit_value", maxValue);
+        fd.set("consistency_rule_pct", consistencyPct);
+        fd.set("phase_1_profit_target_type", phase1Type);
+        fd.set("phase_1_profit_target_value", phase1Value);
+        fd.set("phase_2_profit_target_type", phase2Type);
+        fd.set("phase_2_profit_target_value", phase2Value);
+        fd.set("phase_3_profit_target_type", phase3Type);
+        fd.set("phase_3_profit_target_value", phase3Value);
         startTransition(() => {
           formAction(fd);
         });
@@ -106,60 +183,84 @@ export function AccountEditForm({ account }: { account: Account }) {
           ) : null}
         </Field>
 
-        {account.account_type === "prop_firm" ? (
-          <Field>
-            <FieldLabel htmlFor="e-firm">Firm</FieldLabel>
-            <Input
-              id="e-firm"
-              list="prop-firm-options-edit"
-              value={propFirmName}
-              onChange={(e) => setPropFirmName(e.target.value)}
-              disabled={pending}
-            />
-            <datalist id="prop-firm-options-edit">
-              {COMMON_PROP_FIRMS.map((f) => (
-                <option key={f} value={f} />
-              ))}
-            </datalist>
-          </Field>
+        {isProp ? (
+          <>
+            <Field>
+              <FieldLabel htmlFor="e-firm">Firm</FieldLabel>
+              <Input
+                id="e-firm"
+                list="prop-firm-options-edit"
+                value={propFirmName}
+                onChange={(e) => setPropFirmName(e.target.value)}
+                disabled={pending}
+              />
+              <datalist id="prop-firm-options-edit">
+                {COMMON_PROP_FIRMS.map((f) => (
+                  <option key={f} value={f} />
+                ))}
+              </datalist>
+            </Field>
+
+            <Field data-invalid={!!challengeTypeError}>
+              <FieldLabel htmlFor="e-challenge-type">Type of account</FieldLabel>
+              <Select
+                value={challengeType || undefined}
+                onValueChange={(v) => {
+                  setChallengeType(v);
+                  setChallengeTypeError(null);
+                }}
+                disabled={pending}
+              >
+                <SelectTrigger
+                  id="e-challenge-type"
+                  className="w-full"
+                  aria-invalid={!!challengeTypeError}
+                >
+                  <SelectValue placeholder="Instant, 1/2/3 phase…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {CHALLENGE_TYPES.map((c) => (
+                    <SelectItem key={c.value} value={c.value}>
+                      {c.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {challengeTypeError ? (
+                <FieldError errors={[{ message: challengeTypeError }]} />
+              ) : null}
+            </Field>
+          </>
         ) : null}
 
-        <Field>
-          <FieldLabel htmlFor="e-platform">
-            Broker / platform{" "}
-            <span className="text-muted-foreground font-normal">(optional)</span>
-          </FieldLabel>
-          <Input
+        <Field data-invalid={!!state.fieldErrors?.broker_platform}>
+          <FieldLabel htmlFor="e-platform">Trading platform</FieldLabel>
+          <PickOrOtherField
             id="e-platform"
-            list="broker-platform-options-edit"
             value={brokerPlatform}
-            onChange={(e) => setBrokerPlatform(e.target.value)}
+            onChange={setBrokerPlatform}
+            options={COMMON_BROKER_PLATFORMS.filter((p) => p !== "Other")}
+            placeholder="Select your platform…"
+            otherPlaceholder="Name your platform"
             disabled={pending}
           />
-          <datalist id="broker-platform-options-edit">
-            {COMMON_BROKER_PLATFORMS.map((p) => (
-              <option key={p} value={p} />
-            ))}
-          </datalist>
+          {state.fieldErrors?.broker_platform ? (
+            <FieldError errors={[{ message: state.fieldErrors.broker_platform }]} />
+          ) : null}
         </Field>
 
         <Field>
-          <FieldLabel htmlFor="e-market">
-            Primary market{" "}
-            <span className="text-muted-foreground font-normal">(optional)</span>
+          <FieldLabel>
+            Assets to trade on this account{" "}
+            <span className="text-muted-foreground font-normal">
+              (optional)
+            </span>
           </FieldLabel>
-          <Select value={market || undefined} onValueChange={setMarket} disabled={pending}>
-            <SelectTrigger id="e-market" className="w-full">
-              <SelectValue placeholder="No preference" />
-            </SelectTrigger>
-            <SelectContent>
-              {PRIMARY_MARKETS.map((m) => (
-                <SelectItem key={m.value} value={m.value}>
-                  {m.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <AssetClassToggles
+            value={assetClasses}
+            onChange={setAssetClasses}
+            disabled={pending}
+          />
         </Field>
 
         <div className="grid grid-cols-2 gap-4">
@@ -187,14 +288,13 @@ export function AccountEditForm({ account }: { account: Account }) {
           </Field>
           <Field data-invalid={!!state.fieldErrors?.currency}>
             <FieldLabel htmlFor="e-currency">Currency</FieldLabel>
-            <Input
+            <PickOrOtherField
               id="e-currency"
-              maxLength={3}
-              className="uppercase"
               value={currency}
-              onChange={(e) => setCurrency(e.target.value)}
+              onChange={(v) => setCurrency(v.toUpperCase())}
+              options={CURRENCY_OPTIONS}
+              otherPlaceholder="e.g. AUD, JPY, USDC"
               disabled={pending}
-              aria-invalid={!!state.fieldErrors?.currency}
             />
             {state.fieldErrors?.currency ? (
               <FieldError errors={[{ message: state.fieldErrors.currency }]} />
@@ -244,6 +344,150 @@ export function AccountEditForm({ account }: { account: Account }) {
             </SelectContent>
           </Select>
         </Field>
+
+        <Field data-invalid={!!state.fieldErrors?.daily_loss_limit_value}>
+          <FieldLabel htmlFor="e-daily-limit">
+            {isProp ? "Daily drawdown limit" : "Daily loss limit"}{" "}
+            <span className="text-muted-foreground font-normal">
+              (optional)
+            </span>
+          </FieldLabel>
+          <LossLimitField
+            id="e-daily-limit"
+            type={dailyType}
+            value={dailyValue}
+            onTypeChange={setDailyType}
+            onValueChange={setDailyValue}
+            disabled={pending}
+          />
+          {state.fieldErrors?.daily_loss_limit_value ? (
+            <FieldError errors={[{ message: state.fieldErrors.daily_loss_limit_value }]} />
+          ) : (
+            <FieldDescription>
+              Shown as a live proximity indicator above, computed from your
+              logged trades. No push alerts yet.
+            </FieldDescription>
+          )}
+        </Field>
+
+        <Field data-invalid={!!state.fieldErrors?.max_loss_limit_value}>
+          <FieldLabel htmlFor="e-max-limit">
+            {isProp ? "Max drawdown limit" : "Max loss limit"}{" "}
+            <span className="text-muted-foreground font-normal">
+              (optional)
+            </span>
+          </FieldLabel>
+          <LossLimitField
+            id="e-max-limit"
+            type={maxType}
+            value={maxValue}
+            onTypeChange={setMaxType}
+            onValueChange={setMaxValue}
+            disabled={pending}
+          />
+          {state.fieldErrors?.max_loss_limit_value ? (
+            <FieldError errors={[{ message: state.fieldErrors.max_loss_limit_value }]} />
+          ) : (
+            <FieldDescription>
+              Measured from your starting balance — a static floor, not a
+              trailing high-water mark.
+            </FieldDescription>
+          )}
+        </Field>
+
+        {isProp && relevantPhases.includes(1) ? (
+          <Field data-invalid={!!state.fieldErrors?.phase_1_profit_target_value}>
+            <FieldLabel htmlFor="e-phase-1-target">
+              {relevantPhases.length > 1 ? "Phase 1 profit target" : "Profit target"}{" "}
+              <span className="text-muted-foreground font-normal">(optional)</span>
+            </FieldLabel>
+            <LossLimitField
+              id="e-phase-1-target"
+              type={phase1Type}
+              value={phase1Value}
+              onTypeChange={setPhase1Type}
+              onValueChange={setPhase1Value}
+              disabled={pending}
+            />
+            {state.fieldErrors?.phase_1_profit_target_value ? (
+              <FieldError errors={[{ message: state.fieldErrors.phase_1_profit_target_value }]} />
+            ) : null}
+          </Field>
+        ) : null}
+
+        {isProp && relevantPhases.includes(2) ? (
+          <Field data-invalid={!!state.fieldErrors?.phase_2_profit_target_value}>
+            <FieldLabel htmlFor="e-phase-2-target">
+              Phase 2 profit target{" "}
+              <span className="text-muted-foreground font-normal">(optional)</span>
+            </FieldLabel>
+            <LossLimitField
+              id="e-phase-2-target"
+              type={phase2Type}
+              value={phase2Value}
+              onTypeChange={setPhase2Type}
+              onValueChange={setPhase2Value}
+              disabled={pending}
+            />
+            {state.fieldErrors?.phase_2_profit_target_value ? (
+              <FieldError errors={[{ message: state.fieldErrors.phase_2_profit_target_value }]} />
+            ) : null}
+          </Field>
+        ) : null}
+
+        {isProp && relevantPhases.includes(3) ? (
+          <Field data-invalid={!!state.fieldErrors?.phase_3_profit_target_value}>
+            <FieldLabel htmlFor="e-phase-3-target">
+              Phase 3 profit target{" "}
+              <span className="text-muted-foreground font-normal">(optional)</span>
+            </FieldLabel>
+            <LossLimitField
+              id="e-phase-3-target"
+              type={phase3Type}
+              value={phase3Value}
+              onTypeChange={setPhase3Type}
+              onValueChange={setPhase3Value}
+              disabled={pending}
+            />
+            {state.fieldErrors?.phase_3_profit_target_value ? (
+              <FieldError errors={[{ message: state.fieldErrors.phase_3_profit_target_value }]} />
+            ) : null}
+          </Field>
+        ) : null}
+
+        {isProp && needsConsistency ? (
+          <Field data-invalid={!!state.fieldErrors?.consistency_rule_pct}>
+            <FieldLabel htmlFor="e-consistency">
+              Consistency rule{" "}
+              <span className="text-muted-foreground font-normal">(optional)</span>
+            </FieldLabel>
+            <div className="flex items-center gap-2">
+              <Input
+                id="e-consistency"
+                type="number"
+                inputMode="decimal"
+                step="0.1"
+                min="0"
+                max="100"
+                placeholder="e.g. 30"
+                className="w-28"
+                value={consistencyPct}
+                onChange={(e) => setConsistencyPct(e.target.value)}
+                disabled={pending}
+              />
+              <span className="text-muted-foreground text-sm">
+                % of total profit, max in a single day
+              </span>
+            </div>
+            {state.fieldErrors?.consistency_rule_pct ? (
+              <FieldError errors={[{ message: state.fieldErrors.consistency_rule_pct }]} />
+            ) : (
+              <FieldDescription>
+                For a valid withdrawal — most firms use around 30%.
+              </FieldDescription>
+            )}
+          </Field>
+        ) : null}
 
         <Button type="submit" disabled={pending} className="w-fit">
           {pending ? "Saving…" : "Save changes"}

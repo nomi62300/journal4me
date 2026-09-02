@@ -53,7 +53,7 @@ import { TagInput } from "@/components/trades/tag-input";
 import { createTrade, updateTrade } from "@/lib/trades/actions";
 import { SETUP_GRADE_VALUES } from "@/lib/trades/schema";
 import type { TradeFormState } from "@/lib/trades/schema";
-import { PRIMARY_MARKETS } from "@/lib/accounts/types";
+import { ASSET_CLASSES } from "@/lib/accounts/types";
 import type { Trade } from "@/lib/trades/types";
 import { cn } from "@/lib/utils";
 
@@ -295,7 +295,7 @@ export function TradeForm({
               <SelectValue placeholder="No preference" />
             </SelectTrigger>
             <SelectContent>
-              {PRIMARY_MARKETS.map((m) => (
+              {ASSET_CLASSES.map((m) => (
                 <SelectItem key={m.value} value={m.value}>
                   {m.label}
                 </SelectItem>

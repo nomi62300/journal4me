@@ -24,18 +24,38 @@ function normaliseOptional(value: FormDataEntryValue | null): string | null {
   return s.length > 0 ? s : null;
 }
 
+/** "" (the empty-or-unset sentinel accountSchema's optional fields parse to) -> null. */
+function normaliseLossLimitValue(value: number | "" | undefined): number | null {
+  return value === "" || value === undefined ? null : value;
+}
+function normaliseLossLimitType(value: string | undefined): string | null {
+  return value ? value : null;
+}
+
 /** Fields shared by both create and update — everything except account_type. */
 function commonFieldsFromForm(formData: FormData) {
   return {
     name: formData.get("name"),
     broker_platform: formData.get("broker_platform") ?? "",
     prop_firm_name: formData.get("prop_firm_name") ?? "",
-    primary_market: formData.get("primary_market") ?? "",
+    challenge_type: formData.get("challenge_type") ?? "",
+    asset_classes: formData.getAll("asset_classes"),
     starting_balance: formData.get("starting_balance"),
     currency: formData.get("currency"),
     reset_timezone: formData.get("reset_timezone"),
     reset_time: formData.get("reset_time"),
     day_label_offset: Number(formData.get("day_label_offset") ?? 0),
+    daily_loss_limit_type: formData.get("daily_loss_limit_type") ?? "",
+    daily_loss_limit_value: formData.get("daily_loss_limit_value") ?? "",
+    max_loss_limit_type: formData.get("max_loss_limit_type") ?? "",
+    max_loss_limit_value: formData.get("max_loss_limit_value") ?? "",
+    consistency_rule_pct: formData.get("consistency_rule_pct") ?? "",
+    phase_1_profit_target_type: formData.get("phase_1_profit_target_type") ?? "",
+    phase_1_profit_target_value: formData.get("phase_1_profit_target_value") ?? "",
+    phase_2_profit_target_type: formData.get("phase_2_profit_target_type") ?? "",
+    phase_2_profit_target_value: formData.get("phase_2_profit_target_value") ?? "",
+    phase_3_profit_target_type: formData.get("phase_3_profit_target_type") ?? "",
+    phase_3_profit_target_value: formData.get("phase_3_profit_target_value") ?? "",
   };
 }
 
@@ -99,12 +119,24 @@ export async function createAccount(
       account_type: parsed.data.account_type,
       broker_platform: normaliseOptional(parsed.data.broker_platform ?? ""),
       prop_firm_name: normaliseOptional(parsed.data.prop_firm_name ?? ""),
-      primary_market: normaliseOptional(parsed.data.primary_market ?? ""),
+      challenge_type: normaliseOptional(parsed.data.challenge_type ?? ""),
+      asset_classes: parsed.data.asset_classes,
       starting_balance: parsed.data.starting_balance,
       currency: parsed.data.currency,
       reset_timezone: parsed.data.reset_timezone,
       reset_time: parsed.data.reset_time,
       day_label_offset: parsed.data.day_label_offset,
+      daily_loss_limit_type: normaliseLossLimitType(parsed.data.daily_loss_limit_type),
+      daily_loss_limit_value: normaliseLossLimitValue(parsed.data.daily_loss_limit_value),
+      max_loss_limit_type: normaliseLossLimitType(parsed.data.max_loss_limit_type),
+      max_loss_limit_value: normaliseLossLimitValue(parsed.data.max_loss_limit_value),
+      consistency_rule_pct: normaliseLossLimitValue(parsed.data.consistency_rule_pct),
+      phase_1_profit_target_type: normaliseLossLimitType(parsed.data.phase_1_profit_target_type),
+      phase_1_profit_target_value: normaliseLossLimitValue(parsed.data.phase_1_profit_target_value),
+      phase_2_profit_target_type: normaliseLossLimitType(parsed.data.phase_2_profit_target_type),
+      phase_2_profit_target_value: normaliseLossLimitValue(parsed.data.phase_2_profit_target_value),
+      phase_3_profit_target_type: normaliseLossLimitType(parsed.data.phase_3_profit_target_type),
+      phase_3_profit_target_value: normaliseLossLimitValue(parsed.data.phase_3_profit_target_value),
     })
     .select("id")
     .single();
@@ -144,12 +176,24 @@ export async function updateAccount(
       name: parsed.data.name,
       broker_platform: normaliseOptional(parsed.data.broker_platform ?? ""),
       prop_firm_name: normaliseOptional(parsed.data.prop_firm_name ?? ""),
-      primary_market: normaliseOptional(parsed.data.primary_market ?? ""),
+      challenge_type: normaliseOptional(parsed.data.challenge_type ?? ""),
+      asset_classes: parsed.data.asset_classes,
       starting_balance: parsed.data.starting_balance,
       currency: parsed.data.currency,
       reset_timezone: parsed.data.reset_timezone,
       reset_time: parsed.data.reset_time,
       day_label_offset: parsed.data.day_label_offset,
+      daily_loss_limit_type: normaliseLossLimitType(parsed.data.daily_loss_limit_type),
+      daily_loss_limit_value: normaliseLossLimitValue(parsed.data.daily_loss_limit_value),
+      max_loss_limit_type: normaliseLossLimitType(parsed.data.max_loss_limit_type),
+      max_loss_limit_value: normaliseLossLimitValue(parsed.data.max_loss_limit_value),
+      consistency_rule_pct: normaliseLossLimitValue(parsed.data.consistency_rule_pct),
+      phase_1_profit_target_type: normaliseLossLimitType(parsed.data.phase_1_profit_target_type),
+      phase_1_profit_target_value: normaliseLossLimitValue(parsed.data.phase_1_profit_target_value),
+      phase_2_profit_target_type: normaliseLossLimitType(parsed.data.phase_2_profit_target_type),
+      phase_2_profit_target_value: normaliseLossLimitValue(parsed.data.phase_2_profit_target_value),
+      phase_3_profit_target_type: normaliseLossLimitType(parsed.data.phase_3_profit_target_type),
+      phase_3_profit_target_value: normaliseLossLimitValue(parsed.data.phase_3_profit_target_value),
     })
     .eq("id", id);
 
@@ -163,11 +207,25 @@ export async function updateAccount(
   return {};
 }
 
-export async function setAccountArchived(id: number, archived: boolean) {
+/**
+ * `reason` is only ever meaningful going INTO archived (the "was this
+ * breached?" prompt on a prop_firm account) — unarchiving always clears it,
+ * since a stale breach note attached to an account that's active again is
+ * just confusing, not historical record worth keeping.
+ */
+export async function setAccountArchived(
+  id: number,
+  archived: boolean,
+  reason?: string,
+) {
   const supabase = await createClient();
+  const trimmedReason = reason?.trim();
   const { error } = await supabase
     .from("accounts")
-    .update({ is_archived: archived })
+    .update({
+      is_archived: archived,
+      archive_reason: archived && trimmedReason ? trimmedReason.slice(0, 500) : null,
+    })
     .eq("id", id);
 
   if (error) {

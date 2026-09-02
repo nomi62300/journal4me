@@ -4,6 +4,60 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] — 2026-09-02
+
+### Added — onboarding wizard v2: platform/currency pickers, phase-aware prop-firm rules
+Per a detailed step-by-step spec from the owner, and cross-checked against a Sept 2026 layout
+study of TradeZella, Edgewonk, Tradervue and TraderSync (see `docs/build-plan.md`).
+
+- **Trading platform** (renamed from "Broker / platform") is now required for every account,
+  picked from a dropdown with an "Other" free-text fallback (`PickOrOtherField`) instead of a
+  freely-typed input with suggestions.
+- **Assets to trade on this account** (renamed from "Primary market") is now a multi-select —
+  `accounts.primary_market` (single value) replaced by `accounts.asset_classes text[]`, taxonomy
+  corrected to `forex, commodities, indices, metals, crypto` (drops `stocks`/`futures`, never
+  part of this product's brief; splits `metals` out, per the owner's spec). `trades.asset_class`
+  shares the same taxonomy (they were always one constant reused in two places) and its own
+  CHECK constraint was updated to match.
+- **Currency** is now a dropdown (USD/EUR/GBP/USDT + "Other") instead of a bare 3-letter input.
+  The DB shape check widened from exactly 3 letters to 3–5, since USDT — one of the offered
+  quick-picks — is 4 characters and the old constraint would have rejected its own suggestion.
+- **Daily/max loss limits** (personal) and **daily/max drawdown limits** (prop firm) — optional,
+  a %-or-amount toggle plus a value, shown as a live proximity bar on the account page
+  (`account_today_pnl` DB function, computed via `prop.trading_day` so "today" never disagrees
+  with how trades are bucketed elsewhere). Informational only — not the rule engine.
+- **Type of account is now compulsory for prop firm accounts** (`challenge_type`: instant, 1/2/3
+  phase), and drives which further fields the wizard asks for:
+  - *Instant* and *1 Phase Challenge* — an optional **consistency rule** (`consistency_rule_pct`):
+    "no single day may be more than N% of total profit," the near-universal prop-firm withdrawal
+    gate.
+  - *1/2/3 Phase Challenge* — an optional **profit target per phase** (`phase_{1,2,3}
+    _profit_target_{type,value}`, same %-or-amount shape as the loss limits), rendered on the
+    account page as progress bars with *inverted* color semantics from a loss limit — reaching a
+    profit target is the win (green), not a breach (red). `LossLimitIndicator` gained a
+    `polarity: "limit" | "objective"` prop rather than risk a hit target rendering in alarm red.
+  - challenge_type's requiredness can't be validated by `accountUpdateSchema` (which omits
+    `account_type` entirely, since it's immutable) — enforced client-side in the edit form
+    instead, where the account's existing type is already known.
+- **Archiving a prop firm account now asks an optional "was this breached, and why"** — a
+  `Textarea` in a confirmation dialog, written to a new `accounts.archive_reason` column and
+  shown on the account page while archived. Cleared automatically on unarchive. Personal
+  accounts, and unarchiving either type, skip the dialog — neither carries breach semantics.
+  New `ArchiveAccountControl` replaces the old one-click `<form action={setAccountArchived}>`
+  in both the account card and the account detail page.
+
+### Fixed — two real bugs, found live while building the above
+1. **`PickOrOtherField` never revealed its manual text field.** Selecting "Other" derived
+   visibility from whether `value` was truthy — but picking "Other" clears the value so the
+   field can be typed into, which immediately collapsed the same condition back to false and
+   hid the input the user just asked for. Fixed by tracking "other mode" as its own state
+   instead of deriving it from the (now-empty) value.
+2. **An untouched, blank loss limit silently became a real `0`.** `z.coerce.number().optional()
+   .or(z.literal(""))` coerces `""` to `0` (`Number("") === 0`) *before* the literal("") branch
+   is ever tried, since a zod union tries branches in order — so a blank Max loss limit read
+   back as `type: "", value: 0`, which then failed the "type and value must be set together"
+   refine (0 counts as "set"). Fixed by trying `z.literal("")` first in the union.
+
 ## [0.16.0] — 2026-09-02
 
 ### Added — real Dashboard, with a calendar heatmap as the visual anchor

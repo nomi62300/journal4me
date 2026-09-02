@@ -8,7 +8,7 @@
 
 import { z } from "zod";
 
-import { PRIMARY_MARKET_VALUES } from "@/lib/accounts/schema";
+import { ASSET_CLASS_VALUES } from "@/lib/accounts/schema";
 
 export const DIRECTION_VALUES = ["long", "short"] as const;
 export const SETUP_GRADE_VALUES = ["A+", "A", "B", "C", "D"] as const;
@@ -33,7 +33,7 @@ export const tradeSchema = z
       .toUpperCase()
       .min(1, "Enter a symbol.")
       .max(32, "Keep the symbol under 32 characters."),
-    asset_class: z.enum(PRIMARY_MARKET_VALUES).optional().or(z.literal("")),
+    asset_class: z.enum(ASSET_CLASS_VALUES).optional().or(z.literal("")),
     direction: z.enum(DIRECTION_VALUES),
 
     entry_price: z.coerce.number().positive("Entry price must be positive."),

@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { ArchiveRestore, Archive, ArrowLeft, LineChart } from "lucide-react";
+import { ArrowLeft, LineChart } from "lucide-react";
 
 import { AccountEditForm } from "@/components/accounts/account-edit-form";
+import { ArchiveAccountControl } from "@/components/accounts/archive-account-control";
 import { DeleteAccountDialog } from "@/components/accounts/delete-account-dialog";
+import { LossLimitIndicator } from "@/components/accounts/loss-limit-indicator";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,8 +16,13 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { setAccountArchived } from "@/lib/accounts/actions";
-import { getAccount } from "@/lib/accounts/queries";
+import { getAccount, getAccountTodayPnl } from "@/lib/accounts/queries";
+import {
+  CHALLENGE_TYPES,
+  ASSET_CLASSES,
+  PHASES_FOR_CHALLENGE_TYPE,
+  type ChallengeType,
+} from "@/lib/accounts/types";
 import { formatMoney, formatResetTime } from "@/lib/format";
 
 export async function generateMetadata({
@@ -26,6 +33,16 @@ export async function generateMetadata({
   const { id } = await params;
   const account = await getAccount(Number(id));
   return { title: account?.name ?? "Account" };
+}
+
+/** type/value -> a dollar amount, resolving "percent" against starting_balance. */
+function limitAmount(
+  type: string | null,
+  value: number | null,
+  base: number,
+): number | null {
+  if (type === null || value === null) return null;
+  return type === "percent" ? (base * value) / 100 : value;
 }
 
 export default async function AccountDetailPage({
@@ -47,11 +64,56 @@ export default async function AccountDetailPage({
   // point: this page cannot leak WHICH case it is.
   if (!account) notFound();
 
-  const toggleArchived = setAccountArchived.bind(
-    null,
-    account.id,
-    !account.is_archived,
+  const hasLimits = account.daily_loss_limit_value !== null || account.max_loss_limit_value !== null;
+  const todayPnl = hasLimits ? await getAccountTodayPnl(account.id) : null;
+
+  const dailyLimit = limitAmount(
+    account.daily_loss_limit_type,
+    account.daily_loss_limit_value,
+    account.starting_balance,
   );
+  const maxLimit = limitAmount(
+    account.max_loss_limit_type,
+    account.max_loss_limit_value,
+    account.starting_balance,
+  );
+  const dailyUsed = todayPnl !== null ? Math.max(0, -todayPnl) : 0;
+  const maxUsed =
+    account.balance !== null
+      ? Math.max(0, account.starting_balance - account.balance)
+      : 0;
+  // Profit toward a phase target — the mirror image of maxUsed: how much
+  // above starting balance, not below it.
+  const profitSoFar =
+    account.balance !== null
+      ? Math.max(0, account.balance - account.starting_balance)
+      : 0;
+
+  const challengeLabel = CHALLENGE_TYPES.find(
+    (c) => c.value === account.challenge_type,
+  )?.label;
+
+  const relevantPhases = account.challenge_type
+    ? PHASES_FOR_CHALLENGE_TYPE[account.challenge_type as ChallengeType]
+    : [];
+  const phaseTargets = relevantPhases
+    .map((n) => {
+      const type =
+        n === 1
+          ? account.phase_1_profit_target_type
+          : n === 2
+            ? account.phase_2_profit_target_type
+            : account.phase_3_profit_target_type;
+      const value =
+        n === 1
+          ? account.phase_1_profit_target_value
+          : n === 2
+            ? account.phase_2_profit_target_value
+            : account.phase_3_profit_target_value;
+      const target = limitAmount(type, value, account.starting_balance);
+      return target !== null ? { phase: n, target } : null;
+    })
+    .filter((v): v is { phase: 1 | 2 | 3; target: number } => v !== null);
 
   return (
     <div className="mx-auto max-w-2xl p-4 md:p-6">
@@ -78,6 +140,9 @@ export default async function AccountDetailPage({
                     ? account.prop_firm_name || "Prop firm"
                     : "Personal"}
                 </Badge>
+                {challengeLabel ? (
+                  <Badge variant="outline">{challengeLabel}</Badge>
+                ) : null}
                 {account.is_archived ? (
                   <Badge variant="outline">Archived</Badge>
                 ) : null}
@@ -97,14 +162,18 @@ export default async function AccountDetailPage({
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
             {account.broker_platform ? (
               <>
-                <dt className="text-muted-foreground">Platform</dt>
+                <dt className="text-muted-foreground">Trading platform</dt>
                 <dd className="text-right">{account.broker_platform}</dd>
               </>
             ) : null}
-            {account.primary_market ? (
+            {account.asset_classes.length > 0 ? (
               <>
-                <dt className="text-muted-foreground">Primary market</dt>
-                <dd className="text-right capitalize">{account.primary_market}</dd>
+                <dt className="text-muted-foreground">Assets traded</dt>
+                <dd className="text-right capitalize">
+                  {account.asset_classes
+                    .map((v) => ASSET_CLASSES.find((a) => a.value === v)?.label ?? v)
+                    .join(", ")}
+                </dd>
               </>
             ) : null}
             <dt className="text-muted-foreground">Trading day reset</dt>
@@ -114,12 +183,85 @@ export default async function AccountDetailPage({
             </dd>
           </dl>
 
+          {hasLimits ? (
+            <div className="space-y-3 border-t pt-3">
+              {dailyLimit !== null ? (
+                <LossLimitIndicator
+                  label={
+                    account.account_type === "prop_firm"
+                      ? "Today's drawdown"
+                      : "Today's loss"
+                  }
+                  used={dailyUsed}
+                  limit={dailyLimit}
+                  currency={account.currency}
+                />
+              ) : null}
+              {maxLimit !== null ? (
+                <LossLimitIndicator
+                  label={
+                    account.account_type === "prop_firm"
+                      ? "Drawdown from start"
+                      : "Loss from start"
+                  }
+                  used={maxUsed}
+                  limit={maxLimit}
+                  currency={account.currency}
+                />
+              ) : null}
+              <p className="text-muted-foreground text-xs">
+                Informational only, computed from your logged trades — not a
+                push alert, and not the trailing high-water-mark rule engine
+                real prop firms use.
+              </p>
+            </div>
+          ) : null}
+
+          {phaseTargets.length > 0 ? (
+            <div className="space-y-3 border-t pt-3">
+              {phaseTargets.map(({ phase, target }) => (
+                <LossLimitIndicator
+                  key={phase}
+                  label={
+                    relevantPhases.length > 1
+                      ? `Phase ${phase} profit target`
+                      : "Profit target"
+                  }
+                  used={profitSoFar}
+                  limit={target}
+                  currency={account.currency}
+                  polarity="objective"
+                />
+              ))}
+            </div>
+          ) : null}
+
+          {account.consistency_rule_pct !== null ? (
+            <p className="text-sm">
+              <span className="text-muted-foreground">Consistency rule — </span>
+              no single day may be more than{" "}
+              <span className="font-medium tabular-nums">
+                {account.consistency_rule_pct}%
+              </span>{" "}
+              of total profit, for a valid withdrawal.
+            </p>
+          ) : null}
+
           {account.account_type === "prop_firm" ? (
             <p className="text-muted-foreground border-t pt-3 text-xs">
               Phase progress, drawdown tracking and payout rules for this firm
               arrive with a future update — this account is ready to log
               trades against in the meantime.
             </p>
+          ) : null}
+
+          {account.is_archived && account.archive_reason ? (
+            <div className="bg-muted/40 rounded-md border p-3 text-sm">
+              <p className="text-muted-foreground text-xs font-medium">
+                Archive reason
+              </p>
+              <p className="mt-1">{account.archive_reason}</p>
+            </div>
           ) : null}
 
           <Separator />
@@ -131,21 +273,11 @@ export default async function AccountDetailPage({
                 Log a trade
               </Link>
             </Button>
-            <form action={toggleArchived}>
-              <Button type="submit" variant="outline" size="sm" className="gap-1.5">
-                {account.is_archived ? (
-                  <>
-                    <ArchiveRestore className="size-4" />
-                    Unarchive
-                  </>
-                ) : (
-                  <>
-                    <Archive className="size-4" />
-                    Archive
-                  </>
-                )}
-              </Button>
-            </form>
+            <ArchiveAccountControl
+              accountId={account.id}
+              accountType={account.account_type}
+              isArchived={account.is_archived}
+            />
             <DeleteAccountDialog accountId={account.id} accountName={account.name} />
           </div>
         </CardContent>

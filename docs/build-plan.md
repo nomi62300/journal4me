@@ -508,6 +508,46 @@ ago, quietly erasing that is worse than explaining it.
 
 A 5,000-row CSV import is one statement, ~200 day re-aggregations, one reconciliation.
 
+### 11. The competitive bar: TradeZella's rule-tracking card
+
+Found while auditing the category's own marketing screenshots (Sept 2026, see the layout-study
+callout in §"The validation" below) — TradeZella now ships **Prop Firm Sync**, a real per-challenge
+rule tracker, not just an account label. This is the concrete UI target M6 has to clear, and it
+maps almost exactly onto the data this section already designs:
+
+- **A per-challenge card**: firm name, size and phase badge (`Apex $100K · 1-Step Evaluation`),
+  "X% to target," then a **checklist**, each row with its own pass/fail state:
+  - Trailing threshold — "stay above $3,000 trailing drawdown" (a live floor read, not static text)
+  - Minimum trading days — "7 trading days · 2 days left"
+  - Profit target — a progress bar, `$4,500 / $6,000`
+- **A firm-level "top breach reasons" report** — a ranked list (`Overtraded 6 (25%)`, `News day
+  gamble 4 (17%)`, `Didn't take profit (intraday drawdown) 4 (17%)`) with percentage bars.
+- **A Plaid-linked expense ledger** — evaluation fees, resets, activations and payouts, tagged per
+  firm, rolling up to a net-P&L-and-ROI-per-firm view separate from trading P&L.
+
+Every one of those three is a straight read off what this section already specifies — the checklist
+row is `prop.rule_status`'s per-rule output (§2's layering, §6's hero number) rendered as a list
+instead of a paragraph; the breach report is a `group by rule_key` over `breach_events` (§4, §10);
+the expense ledger is `account_ledger` (§4's `affects_hwm`/`affects_daily_loss` flags) filtered to
+non-trade movements and rolled up by `prop_firm_name`. **None of it requires new backend design** —
+it is the UI M6 was always going to need, now with a screenshot to build past rather than a
+hypothesis.
+
+What their card does **not** show, and where §5 through §7 stay the actual differentiator:
+
+- No visible distinction between a **static** floor and a **trailing** one on the card itself — the
+  copy says "trailing drawdown" but nothing communicates *how* today's number was derived, which is
+  exactly the confidence/estimated-vs-exact gap §7 exists to close.
+- A single "Evaluation → Funded" badge, not the four-topology phase model (§4b) — no visible
+  handling of instant-funded or a 3-phase account's middle phase.
+- "Top breach reasons" reads as a **user-tagged qualitative log**, not a computed diff against
+  `breach_events` — ours can say *which specific day and rule* retracted or triggered, theirs
+  appears to ask the user to self-report why.
+
+The pitch this earns: not "we track prop rules and nobody else does," but **"we show our work — a
+static floor and a trailing one look different on our card, and we tell you when a number is
+estimated instead of quietly rendering it with the same confidence as an exact one."**
+
 ---
 
 ## Application structure
@@ -542,7 +582,10 @@ Verified against what TradeZella, TraderSync, Tradervue and Edgewonk ship:
   current streak.
 - Equity curve and drawdown curve.
 - Calendar heatmap of daily P&L — the single most recognisable feature of the category, and the
-  entry point into the day view.
+  entry point into the day view. Confirmed again by the Sept 2026 layout study: TradeZella,
+  Edgewonk and Tradervue all use it as the **Dashboard's visual anchor**, not a Journal-only
+  screen reached by a separate click — the largest single element on every dashboard screenshot
+  we found belongs to the calendar. M5 should put it on the Dashboard itself.
 - R-multiple distribution histogram.
 - Breakdowns by symbol, strategy, day of week, session/hour and hold duration.
 - MAE/MFE scatter — answers "was my stop too tight?", the highest-value review question, and
@@ -557,7 +600,16 @@ Cheap to build, and their absence is conspicuous to anyone comparing against the
   its value and cost almost nothing.
 - **Rules-followed checklist** — each trade is scored against its strategy's own entry criteria,
   so "my A+ setups make money, my rule-breaks lose money" becomes a report rather than a
-  feeling. This is what makes `strategies` more than a text field.
+  feeling. This is what makes `strategies` more than a text field. Edgewonk ships exactly this
+  (checklist criteria → a per-rule followed-%/win-rate table, computed automatically) and it's
+  their clearest advantage over the other three — direct market validation, build it as designed.
+- **Tag polarity** — a tag needs a sign, not just a label. Edgewonk splits trade-entry tags into
+  *negative* ("revenge trading," "too early," "impulsive") and *positive* ("perfect entry"), which
+  is what turns a tag report into "what's actually costing me money" instead of an undifferentiated
+  frequency count. Our `trades.tags text[]` has no such notion today — add a small
+  `tag_definitions (user_id, label, polarity)` lookup (or a `polarity` column if tags stay
+  freeform) before the tag-breakdown report in the Analytics milestone is built, since retrofitting
+  polarity onto months of untagged history is a worse migration than adding it now.
 - **Position size / risk calculator** — given account balance, risk %, entry and stop, output
   the size. Traders use one daily; having it inside the journal is a retention hook.
 - **Data export** (CSV + JSON). Important for trust in a paid product, and doubly so for an
@@ -620,11 +672,16 @@ Two useful signals from the survey:
 1. **The stack choice is confirmed.** deltalytix — the most credible open-source journal in this
    space — independently landed on Next.js + shadcn + `@supabase/ssr`. Our architecture is the
    one a serious builder in this category converges on.
-2. **The wedge is real and unclaimed.** Searching GitHub for prop-firm journaling returns
-   *nothing above zero stars*. No open-source project models trailing drawdown, consistency
-   rules, or payout eligibility. The incumbents that do touch prop firms do it as an account
-   label, not a rule engine. The corollary is a warning too: nobody has solved the hard problems
-   (§7's intraday-equity limitation) for us to copy — that work is genuinely ours.
+2. **The wedge is real, and half of it is now claimed — update from the Sept 2026 layout study.**
+   The open-source half of this claim still holds: searching GitHub for prop-firm journaling
+   returns *nothing above zero stars*, no OSS project models trailing drawdown, consistency
+   rules, or payout eligibility. The commercial half does **not** still hold as originally
+   written: TradeZella's **Prop Firm Sync** (see §11 under "Prop firm rule engine") is a real
+   per-challenge checklist card, not just an account label — "the incumbents... do it as an
+   account label" is the specific sentence that's now wrong. What's still true, and still
+   genuinely ours: nobody visible in the category has solved §7's intraday-equity confidence
+   problem — a competitor's card can show a checklist without ever admitting a number might be
+   an estimate. That gap, not the mere existence of drawdown tracking, is the defensible wedge now.
 
 ### What to take from them
 
@@ -666,16 +723,26 @@ Each milestone ends in a working, verifiable state.
   which is exactly why a mapping UI is required rather than a fixed parser.
 - **M5 — Daily summaries & analytics.** `daily_summaries` plus the statement-level
   re-aggregation trigger, then the metric layer and chart suite on top. The summaries table
-  serves both the analytics and the rule engine, so it is built once, here.
+  serves both the analytics and the rule engine, so it is built once, here. **The calendar
+  heatmap belongs on the Dashboard itself**, not gated behind a Journal click — every competitor
+  audited treats it as the dashboard's visual anchor (see "Analytics that must exist to be
+  competitive"). Tag polarity (positive/negative) ships before the tag-breakdown report, not after.
 - **M6 — Prop firm rule engine.** Versioned profiles, `drawdown_rules`, `consistency_rules`, the
   day-series view, `prop.rule_status`, `breach_events`. **`equity_marks` and
   `balance_reconciliations` ship in this milestone, not after** — without them v1 shows
   confidently wrong numbers on Apex-style accounts, the exact failure this design exists to
-  prevent.
+  prevent. **UI deliverable, not just schema**: the per-challenge checklist card and firm-level
+  breach-reasons report specified in §11 — the concrete bar TradeZella's Prop Firm Sync has set,
+  with §7's confidence/estimated-vs-exact framing as what ours does that theirs doesn't.
 - **M7 — Web push.** VAPID setup, subscription management, the iOS install flow, trigger and
-  `pg_cron` wiring, in-app notification centre.
+  `pg_cron` wiring, in-app notification centre. Worth noting: the Sept 2026 layout study found
+  no competitor markets an alerting feature beyond a generic bell icon — this milestone is
+  genuine open ground, not a catch-up item, so it's fine to design it on its own merits rather
+  than against a specific incumbent screen.
 - **M8 — Journal, strategies & commercial surface.** Notebook, playbooks, landing, pricing,
-  plan gating UI, polish.
+  plan gating UI, polish. Settings is similarly under-benchmarked by the category (only Edgewonk
+  exposes a labeled, expandable settings nav on a public screenshot) — no specific screen to
+  match here either.
 
 Per the owner's stated practice, every milestone ships with a `CHANGELOG.md` entry (Keep a
 Changelog format) and a version bump in the same commit, and feature work happens on a branch
