@@ -4,6 +4,36 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-09-02
+
+### Added
+- Local Supabase stack running on Colima (Docker Desktop needs sudo, which a
+  non-interactive session cannot supply). `npm run db:start` / `db:reset` / `db:stop`.
+  The local stack is trimmed to postgres, gotrue, postgrest and kong via `supabase
+  start -x`, at runtime rather than in `config.toml` — that file is what `config push`
+  sends to the hosted project, so disabling storage locally would disable it in production.
+- First migrations: `set_updated_at()`, and `plans` / `subscriptions` /
+  `plan_limit()` / `plan_allows()` with free and pro tiers seeded.
+
+### Security
+- **Revoked TRUNCATE, TRIGGER, REFERENCES and MAINTAIN from `anon` and `authenticated`**,
+  on existing tables and by default privilege for future ones.
+  Supabase's default privileges grant these on every table created in `public`. Creating
+  the project with "automatically expose new tables" off removed the select/insert/update/
+  delete half but left this half, which is the dangerous one: **RLS does not apply to
+  TRUNCATE.** Demonstrated on a probe table — `anon` got `permission denied` on `select`
+  and then successfully truncated the table, destroying every row. Not reachable through
+  PostgREST today (no TRUNCATE verb), but a live privilege on tables that will hold users'
+  entire trading history.
+- New tables now start with zero privileges for `anon`/`authenticated`, so an explicit
+  grant is the only thing that opens a table — the intended fail-closed posture.
+
+### Fixed
+- Corrected an inherited convention: `generated always as identity` columns do **not**
+  need `grant usage, select on sequence`. Verified empirically — an insert by a role
+  holding only the table grant succeeds. The unnecessary grants were removed and
+  `AGENTS.md` updated. (`serial` columns would need one; identity columns are preferred.)
+
 ## [0.3.0] — 2026-09-02
 
 ### Added

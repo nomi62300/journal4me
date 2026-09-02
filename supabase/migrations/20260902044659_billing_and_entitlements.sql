@@ -62,7 +62,11 @@ create policy "plans_select_all" on public.plans
 -- still fail with 42501. See AGENTS.md.
 grant select on public.plans to anon, authenticated;
 grant select, insert, update, delete on public.plans to service_role;
-grant usage, select on sequence public.plans_id_seq to service_role;
+-- No sequence grant: `generated always as identity` owns its sequence
+-- internally and permission is implied by the table grant. Verified on this
+-- schema -- an insert as a role holding only the table grant succeeds. A
+-- `serial` column is different and WOULD need one, which is a reason to keep
+-- using identity columns.
 
 -- --------------------------------------------------------------------------
 -- subscriptions — one per user, written only by the billing webhook
@@ -108,7 +112,6 @@ create policy "subscriptions_select_own" on public.subscriptions
 
 grant select on public.subscriptions to authenticated;
 grant select, insert, update, delete on public.subscriptions to service_role;
-grant usage, select on sequence public.subscriptions_id_seq to service_role;
 
 -- --------------------------------------------------------------------------
 -- Entitlement resolution

@@ -20,13 +20,23 @@ personal and prop-firm accounts. See `docs/build-plan.md` for the full plan and
   auth.users(id) on delete cascade`, an index on it, RLS enabled, and `<table>_<verb>_own`
   policies. There is no such thing as a shared user-data table here.
 - **RLS policies alone grant nothing.** Every `create table` migration MUST also issue the
-  SQL grants in the same migration, including the identity sequence:
+  SQL grants in the same migration:
   ```sql
   grant select, insert, update, delete on public.<table> to authenticated;
-  grant usage, select on sequence public.<table>_id_seq to authenticated;
   ```
   `service_role` bypasses RLS but NOT grants — grant it explicitly where cron writes.
   Omitting this fails at runtime with Postgres `42501`, not at migration time.
+  Since `20260902050421_harden_default_privileges.sql`, a new table starts with **zero**
+  privileges for `anon`/`authenticated`, so this is now the only thing that opens a table
+  up — which is the intended fail-closed posture.
+  **No sequence grant is needed** for `generated always as identity`: the sequence is owned
+  by the column and permission follows the table grant. Verified empirically — an insert by
+  a role holding only the table grant succeeds. (A `serial` column *would* need one. Use
+  identity columns.)
+- **Never grant `truncate` to `anon` or `authenticated`.** RLS does not apply to TRUNCATE.
+  Proven on this schema: a role that got `permission denied` on `select` still truncated the
+  table and destroyed every row. The hardening migration revokes it and sets default
+  privileges so new tables never receive it — do not reintroduce it.
 - **Views must be `with (security_invoker = true)`.** A view over an RLS table defaults to
   definer rights and leaks every tenant's data. Materialized views cannot enforce RLS at
   all — never use one.

@@ -1,6 +1,6 @@
 {
   "name": "journal4me",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -9,7 +9,7 @@
     "lint": "eslint",
     "db:start": "supabase start -x realtime,storage-api,imgproxy,studio,postgres-meta,edge-runtime,logflare,vector,supavisor,mailpit",
     "db:stop": "supabase stop",
-    "db:reset": "supabase db reset -x realtime,storage-api,imgproxy,studio,postgres-meta,edge-runtime,logflare,vector,supavisor,mailpit",
+    "db:reset": "supabase db reset --local",
     "db:status": "supabase status"
   },
   "dependencies": {
