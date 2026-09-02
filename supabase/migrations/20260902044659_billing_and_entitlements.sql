@@ -190,19 +190,31 @@ grant execute on function public.plan_allows(uuid, text) to authenticated, servi
 -- sample data: plan_limit() falls back to it for every user without a
 -- subscription, so an environment missing this row denies everything.
 --
+-- The free tier deliberately includes `prop_rule_engine`. It is the one thing
+-- no competitor offers, and it is not persuasive described — a trader has to
+-- watch it catch a near-breach on their own account. Gating it entirely would
+-- mean free users never encounter the reason to pay. They get one personal and
+-- one prop account, which is enough to feel it and not enough to run a book.
+--
+-- Account limits are split by type rather than one `max_accounts`, because
+-- "one of each" cannot be expressed as a single number, and a prop trader
+-- juggling several challenges is exactly who should be on Pro.
+--
 -- Prices are placeholders until pricing is decided; is_active gates what the
 -- pricing page shows, so a tier can exist for testing without being sold.
 insert into public.plans
   (code, name, description, price_cents, billing_interval, sort_order, limits)
 values
-  ('free', 'Free', 'Track a single account and see whether the habit sticks.',
+  ('free', 'Free', 'One personal and one prop firm account, with the full rule engine.',
    0, 'month', 0,
-   '{"max_accounts": 1, "max_trades_per_month": 50, "csv_import": false,
-     "push_notifications": false, "prop_rule_engine": false, "data_export": true}'::jsonb),
-  ('pro', 'Pro', 'Every account, every rule, unlimited history.',
+   '{"max_personal_accounts": 1, "max_prop_accounts": 1, "max_trades_per_month": 30,
+     "csv_import": false, "push_notifications": false, "prop_rule_engine": true,
+     "data_export": false}'::jsonb),
+  ('pro', 'Pro', 'Every account, unlimited history, imports and alerts.',
    0, 'month', 1,
-   '{"max_accounts": -1, "max_trades_per_month": -1, "csv_import": true,
-     "push_notifications": true, "prop_rule_engine": true, "data_export": true}'::jsonb)
+   '{"max_personal_accounts": -1, "max_prop_accounts": -1, "max_trades_per_month": -1,
+     "csv_import": true, "push_notifications": true, "prop_rule_engine": true,
+     "data_export": true}'::jsonb)
 on conflict (code) do update
   set name             = excluded.name,
       description      = excluded.description,

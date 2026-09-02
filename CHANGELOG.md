@@ -4,6 +4,18 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-09-02
+
+### Changed
+- Free tier reshaped: 1 personal + 1 prop firm account, 30 trades/month, manual entry
+  only, and **the prop firm rule engine included**. Everything else is Pro.
+  The rule engine is the one thing no competitor offers and it does not sell by
+  description — a trader has to watch it catch a near-breach on their own account.
+  One account of each type is enough to feel it and not enough to run a book.
+- Account limits split into `max_personal_accounts` / `max_prop_accounts`. "One of each"
+  cannot be expressed as a single `max_accounts`, and a trader juggling several
+  challenges at once is exactly who belongs on Pro.
+
 ## [0.4.0] — 2026-09-02
 
 ### Added
