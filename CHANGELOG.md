@@ -4,6 +4,26 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] — 2026-09-02
+
+### Added — real Dashboard, with a calendar heatmap as the visual anchor
+- Removed the placeholder "Signed in" card (email/user ID belongs to a profile in Settings,
+  not the Dashboard) and rebuilt the page around real portfolio data: total balance and
+  realized P&L (grouped by currency, never silently summed across them), win rate, open
+  positions, an account-balance grid and a recent-trades list.
+- `CalendarHeatmap` — a month-grid of realized P&L by day (win/loss color-coded, trade counts,
+  month-total, prev/next/"Today" navigation), scoped to one currency at a time. Every trading
+  journal audited (TradeZella, Edgewonk, Tradervue) treats this as the dashboard's single
+  largest element, not a Journal-only feature — this pulls that piece of M5 forward onto the
+  Dashboard now, computed client-side over already-fetched trades (no new query, no
+  `daily_summaries` table yet — that's still M5 proper).
+- `scripts/seed-demo-data.sh` — reusable local-only seed script for realistic demo trades
+  (~35/account, believable win rate, R-multiples derived from a target-R-then-back-into-size
+  calculation so `r_multiple` reads as real trading, not an artifact of two independently
+  random numbers). Temporarily disables the statement-level trade-quota trigger for the
+  duration of the seed (via a bash `trap`, so a crashed run can't leave it off) — never point
+  this at anything but the local stack.
+
 ## [0.15.0] — 2026-09-02
 
 ### Changed — re-skin to Medusa's design tokens
