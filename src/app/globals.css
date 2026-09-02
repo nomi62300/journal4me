@@ -7,8 +7,8 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-roboto-mono);
   --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -27,6 +27,7 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -48,73 +49,121 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/*
+ * Colour values below are copied verbatim (not approximated) from Medusa's
+ * admin design system — medusajs/medusa, packages/design-system/ui-preset/
+ * src/theme/tokens/{colors,effects}.ts — and remapped onto shadcn's existing
+ * semantic variable names so every shadcn primitive re-skins with zero
+ * component-level changes. Values are pinned to what was copied; they will
+ * not follow future Medusa releases.
+ */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --background: rgba(250, 250, 250, 1); /* bg-subtle */
+  --foreground: rgba(24, 24, 27, 1); /* fg-base */
+  --card: rgba(255, 255, 255, 1); /* bg-base */
+  --card-foreground: rgba(24, 24, 27, 1); /* fg-base */
+  --popover: rgba(255, 255, 255, 1); /* bg-base */
+  --popover-foreground: rgba(24, 24, 27, 1); /* fg-base */
+  --primary: rgba(39, 39, 42, 1); /* button-inverted */
+  --primary-foreground: rgba(255, 255, 255, 1); /* fg-on-inverted */
+  --secondary: rgba(250, 250, 250, 1); /* bg-component */
+  --secondary-foreground: rgba(24, 24, 27, 1); /* fg-base */
+  --muted: rgba(250, 250, 250, 1); /* bg-subtle */
+  --muted-foreground: rgba(113, 113, 122, 1); /* fg-muted */
+  --accent: rgba(244, 244, 245, 1); /* bg-base-hover */
+  --accent-foreground: rgba(24, 24, 27, 1); /* fg-base */
+  --destructive: rgba(225, 29, 72, 1); /* fg-error (== button-danger in light — they're identical here) */
+  --destructive-foreground: rgba(255, 255, 255, 1); /* fg-on-color */
+  --border: rgba(228, 228, 231, 1); /* border-base */
+  --input: rgba(212, 212, 216, 1); /* border-strong */
+  --ring: rgba(59, 130, 246, 1); /* border-interactive */
+  --chart-1: rgba(96, 165, 250, 1); /* tag-blue-icon */
+  --chart-2: rgba(16, 185, 129, 1); /* tag-green-icon */
+  --chart-3: rgba(249, 115, 22, 1); /* tag-orange-icon */
+  --chart-4: rgba(167, 139, 250, 1); /* tag-purple-icon */
+  --chart-5: rgba(244, 63, 94, 1); /* tag-red-icon */
+  --radius: 0.5rem;
+  --sidebar: rgba(255, 255, 255, 1); /* bg-base */
+  --sidebar-foreground: rgba(24, 24, 27, 1); /* fg-base */
+  --sidebar-primary: rgba(39, 39, 42, 1); /* button-inverted */
+  --sidebar-primary-foreground: rgba(255, 255, 255, 1); /* fg-on-inverted */
+  --sidebar-accent: rgba(244, 244, 245, 1); /* bg-base-hover */
+  --sidebar-accent-foreground: rgba(24, 24, 27, 1); /* fg-base */
+  --sidebar-border: rgba(228, 228, 231, 1); /* border-base */
+  --sidebar-ring: rgba(59, 130, 246, 1); /* border-interactive */
+
+  --elevation-card-rest: 0px 0px 0px 1px rgba(0, 0, 0, 0.08),
+    0px 1px 2px -1px rgba(0, 0, 0, 0.08), 0px 2px 4px 0px rgba(0, 0, 0, 0.04);
+  --elevation-card-hover: 0px 0px 0px 1px rgba(0, 0, 0, 0.08),
+    0px 1px 2px -1px rgba(0, 0, 0, 0.08), 0px 2px 8px 0px rgba(0, 0, 0, 0.1);
+  --elevation-modal: 0px 0px 0px 1px rgba(255, 255, 255, 1) inset,
+    0px 0px 0px 1.5px rgba(228, 228, 231, 0.6) inset,
+    0px 0px 0px 1px rgba(0, 0, 0, 0.08), 0px 8px 16px 0px rgba(0, 0, 0, 0.08),
+    0px 16px 32px 0px rgba(0, 0, 0, 0.08);
+  --elevation-tooltip: 0px 0px 0px 1px rgba(0, 0, 0, 0.08),
+    0px 2px 4px 0px rgba(0, 0, 0, 0.08), 0px 4px 8px 0px rgba(0, 0, 0, 0.08);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: rgba(24, 24, 27, 1); /* bg-subtle */
+  --foreground: rgba(244, 244, 245, 1); /* fg-base */
+  --card: rgba(33, 33, 36, 1); /* bg-base */
+  --card-foreground: rgba(244, 244, 245, 1); /* fg-base */
+  --popover: rgba(33, 33, 36, 1); /* bg-base */
+  --popover-foreground: rgba(244, 244, 245, 1); /* fg-base */
+  --primary: rgba(82, 82, 91, 1); /* button-inverted */
+  --primary-foreground: rgba(24, 24, 27, 1); /* fg-on-inverted */
+  --secondary: rgba(39, 39, 42, 1); /* bg-component */
+  --secondary-foreground: rgba(244, 244, 245, 1); /* fg-base */
+  --muted: rgba(39, 39, 42, 1); /* bg-component */
+  --muted-foreground: rgba(113, 113, 122, 1); /* fg-muted */
+  --accent: rgba(39, 39, 42, 1); /* bg-base-hover */
+  --accent-foreground: rgba(244, 244, 245, 1); /* fg-base */
+  /* fg-error, NOT button-danger (rgba(159,18,57,1)) — every consumer in
+     this shadcn preset (Button's "destructive" variant, Alert, aria-invalid
+     rings/borders) uses --destructive as TEXT/foreground with an
+     alpha-blended background (text-destructive, bg-destructive/10), never
+     as a solid full-opacity fill. button-danger is Medusa's solid-fill
+     color and reads as near-invisible dark maroon text on a dark ground —
+     found live: the dashboard calendar's loss-day P&L was barely legible
+     in dark mode. fg-error is the bright salmon Medusa itself uses for
+     error TEXT, and light mode's fg-error/button-danger are already the
+     same value, so this only changes dark mode. */
+  --destructive: rgba(251, 113, 133, 1); /* fg-error */
+  --destructive-foreground: rgba(255, 255, 255, 1); /* fg-on-color */
+  --border: rgba(255, 255, 255, 0.08); /* border-base */
+  --input: rgba(255, 255, 255, 0.16); /* border-strong */
+  --ring: rgba(96, 165, 250, 1); /* border-interactive */
+  --chart-1: rgba(96, 165, 250, 1); /* tag-blue-icon */
+  --chart-2: rgba(16, 185, 129, 1); /* tag-green-icon */
+  --chart-3: rgba(251, 146, 60, 1); /* tag-orange-icon */
+  --chart-4: rgba(167, 139, 250, 1); /* tag-purple-icon */
+  --chart-5: rgba(251, 113, 133, 1); /* tag-red-icon */
+  --sidebar: rgba(33, 33, 36, 1); /* bg-base */
+  --sidebar-foreground: rgba(244, 244, 245, 1); /* fg-base */
+  --sidebar-primary: rgba(82, 82, 91, 1); /* button-inverted */
+  --sidebar-primary-foreground: rgba(24, 24, 27, 1); /* fg-on-inverted */
+  --sidebar-accent: rgba(39, 39, 42, 1); /* bg-base-hover */
+  --sidebar-accent-foreground: rgba(244, 244, 245, 1); /* fg-base */
+  --sidebar-border: rgba(255, 255, 255, 0.08); /* border-base */
+  --sidebar-ring: rgba(96, 165, 250, 1); /* border-interactive */
+
+  --elevation-card-rest: 0px -1px 0px 0px rgba(255, 255, 255, 0.06),
+    0px 0px 0px 1px rgba(255, 255, 255, 0.06),
+    0px 0px 0px 1px rgba(39, 39, 42, 1), 0px 1px 2px 0px rgba(0, 0, 0, 0.32),
+    0px 2px 4px 0px rgba(0, 0, 0, 0.32);
+  --elevation-card-hover: 0px -1px 0px 0px rgba(255, 255, 255, 0.06),
+    0px 0px 0px 1px rgba(255, 255, 255, 0.06),
+    0px 0px 0px 1px rgba(39, 39, 42, 1), 0px 1px 4px 0px rgba(0, 0, 0, 0.48),
+    0px 2px 8px 0px rgba(0, 0, 0, 0.48);
+  --elevation-modal: 0px 0px 0px 1px rgba(24, 24, 27, 1) inset,
+    0px 0px 0px 1.5px rgba(255, 255, 255, 0.06) inset,
+    0px -1px 0px 0px rgba(255, 255, 255, 0.04),
+    0px 0px 0px 1px rgba(255, 255, 255, 0.1),
+    0px 4px 8px 0px rgba(0, 0, 0, 0.32), 0px 8px 16px 0px rgba(0, 0, 0, 0.32);
+  --elevation-tooltip: 0px -1px 0px 0px rgba(255, 255, 255, 0.04),
+    0px 2px 4px 0px rgba(0, 0, 0, 0.32), 0px 0px 0px 1px rgba(255, 255, 255, 0.1),
+    0px 4px 8px 0px rgba(0, 0, 0, 0.32);
 }
 
 @layer base {

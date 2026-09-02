@@ -4,6 +4,26 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] — 2026-09-02
+
+### Changed — re-skin to Medusa's design tokens
+- Copied Medusa's actual color values (`medusajs/medusa`, `packages/design-system/ui-preset`)
+  for both light and dark themes into `globals.css`, mapped onto shadcn's *existing* semantic
+  variable names (`--background`, `--card`, `--primary`, `--border`, etc.) — every already-built
+  component picks up the new look with zero component-code changes. Values are copied, not the
+  npm package: static-pinned to what was copied, no dependency, no auto-update — the owner's own
+  tradeoff call.
+- Swapped Geist/Geist Mono for Inter/Roboto Mono, matching Medusa's real font stack.
+- `--radius` tightened to `0.5rem` to match Medusa's visual density — their own preset has no
+  radius token to copy (confirmed by reading its full `theme.extend`), so this is a reasoned
+  match to their rendered UI, not a copied value.
+- **Fixed a dark-mode contrast bug**, found live on the dashboard calendar: `--destructive` was
+  mapped to Medusa's `button-danger` (a solid-fill color), but every consumer in this shadcn
+  preset — Button's `destructive` variant, `Alert`, `aria-invalid` rings — uses `--destructive`
+  as alpha-blended *text*, not a solid fill. In dark mode `button-danger` and Medusa's actual
+  text-error color (`fg-error`) diverge sharply (deep maroon vs. bright salmon); in light mode
+  they're identical, which is why only dark mode was affected. Remapped to `fg-error`.
+
 ## [0.14.0] — 2026-09-02
 
 ### Added — M3: Trades (entry, log, detail, screenshots)
