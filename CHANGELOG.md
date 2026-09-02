@@ -4,6 +4,44 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] — 2026-09-02
+
+### Added
+- `account_ledger` — every balance movement that is not a trade: payouts, separately
+  billed commissions, swap/financing, platform fees, firm corrections, resets.
+  The build spec omits this entirely, and it is its largest gap: balance is NOT the
+  running sum of trade P&L, and every drawdown floor is computed off balance. Without it
+  the computed balance drifts from the firm's real one over weeks while still displaying
+  a precise number.
+- `trading_day` is stamped by trigger from the ACCOUNT's reset config, and re-stamped when
+  `occurred_at` or `account_id` changes — moving an entry across the reset boundary must
+  re-bucket it, or one day's totals stay wrong forever.
+- `affects_hwm` / `affects_daily_loss` are stored per row because firms genuinely disagree.
+  Filled from per-kind conventions when omitted, always overridable. Deposits and resets do
+  not lift the high-water mark (external capital is not performance, and counting it would
+  raise a trailing floor with no trading); payouts do not either, so the cushion correctly
+  shrinks by the payout.
+- Sign constraint per kind: a payout logged as positive is rejected, since it would inflate
+  balance and hand the user headroom that does not exist.
+- 7 more assertions in `npm run test:rls` (now 24).
+
+### Verified
+- Day stamping follows the account timezone: on a 17:00 New York account, 16:00 buckets to
+  the 2nd, 18:00 to the 3rd, and the next day's 16:59 still to the 3rd.
+- Per-kind flag defaults: deposit (f,f), payout (f,f), swap (t,t), platform_fee (t,f).
+- `NOT NULL` columns can be filled by a `BEFORE` trigger — column constraints are checked
+  after before-row triggers. Verified on this database rather than assumed, which is what
+  lets callers omit the flags while the column can never end up null.
+- Cross-account writes are blocked twice: `stamp_account_ledger()` runs SECURITY INVOKER,
+  so its accounts lookup is RLS-filtered and another user's account simply is not there,
+  and the RLS policy re-checks account ownership behind it.
+
+### Fixed
+- A ledger security test that passed for the wrong reason. It had user B select A's account
+  id, which returns nothing under RLS, so the INSERT touched 0 rows and "passed" without
+  ever attempting the attack. The id is now fetched as the DB owner so the attack actually
+  reaches its target. A denial test that cannot reach the thing it tests proves nothing.
+
 ## [0.7.0] — 2026-09-02
 
 ### Added

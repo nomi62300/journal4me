@@ -77,6 +77,18 @@ Every shipped change gets its own commit with a `CHANGELOG.md` entry (Keep a Cha
 format) and a version bump in `package.json`, as one unit in the same push. Feature work
 happens on a branch; only reviewed work reaches `main`.
 
+## Working with the owner
+
+- **Announce the recommended model and effort at the start of every phase or sub-phase**,
+  before doing the work. The owner switches models manually to manage usage and needs the
+  recommendation up front. One line is enough: `Next: CSV import — recommend Sonnet 5,
+  high effort.`
+- Rule of thumb: full context but wrong answer → upgrade the MODEL; right idea but skipped
+  steps → raise the EFFORT.
+- Never economise on anything writing an RLS policy or GRANT (failure is silent — a missing
+  policy returns rows rather than throwing), or anything computing money or drawdown (a
+  wrong number still looks like a number).
+
 ## Verification
 
 Live-verify everything; never claim something works from code review alone. The

@@ -42,18 +42,27 @@ expect_ok() {
 
 # A denial test that accepts ANY error is close to worthless: a typo in a table
 # name would "pass" as a successful block. The error must be the RIGHT error —
-# an RLS/permission denial or our own timezone validation — not a SQL mistake.
+# an RLS denial, a CHECK violation, or one of our own guards — not a SQL mistake.
+#
+# "not found or not yours" comes from stamp_account_ledger(). That trigger runs
+# SECURITY INVOKER, so its accounts lookup is RLS-filtered and someone else's
+# account simply is not there. It fires before the RLS policy is evaluated, so
+# cross-account writes are blocked twice over: trigger first, policy behind it.
 expect_deny() {
   local d=$1 u=$2 s=$3 out
   out=$(as_user "$u" "$s" 2>&1)
   if [[ $? -eq 0 ]]; then
     bad "$d (expected denial, but it SUCCEEDED)"
-  elif grep -qiE 'row-level security|permission denied|violates row-level|Unknown timezone' <<<"$out"; then
+  elif grep -qiE 'row-level security|permission denied|violates row-level|Unknown timezone|violates check constraint|duplicate key value|not found or not yours' <<<"$out"; then
     ok "$d"
   else
     bad "$d (blocked, but by the WRONG error: $(grep -m1 ERROR <<<"$out"))"
   fi
 }
+# Run SQL as the DB owner, bypassing RLS. Used only to set up an attack the
+# attacker could not stage themselves.
+as_owner() { docker exec -i "$DB" psql -U postgres -d postgres -q -t -v ON_ERROR_STOP=1 -c "$1" 2>&1; }
+
 expect_eq() {
   local d=$1 u=$2 s=$3 want=$4
   local got; got=$(as_user "$u" "$s" | tr -d ' \n\r')
@@ -98,6 +107,24 @@ echo
 echo "==> Archiving frees a plan slot"
 expect_ok   "A archives its personal account"      "$A" "update public.accounts set is_archived=true where user_id='$A' and account_type='personal';"
 expect_ok   "A can now create another personal"    "$A" "insert into public.accounts (user_id,name,account_type,starting_balance) values ('$A','A personal fresh','personal',2000);"
+
+echo
+echo "==> Ledger"
+expect_ok   "A adds a commission to its own account"  "$A" "insert into public.account_ledger (user_id,account_id,kind,amount) select '$A', id, 'commission', -4 from public.accounts where user_id='$A' and account_type='prop_firm';"
+expect_eq   "ledger row got a trading_day stamped"    "$A" "select count(*) from public.account_ledger where trading_day is not null;" "1"
+expect_deny "A cannot log a POSITIVE payout"          "$A" "insert into public.account_ledger (user_id,account_id,kind,amount) select '$A', id, 'withdrawal_payout', 2000 from public.accounts where user_id='$A' and account_type='prop_firm';"
+expect_eq   "B sees none of A's ledger"               "$B" "select count(*) from public.account_ledger;" "0"
+# The dangerous case: B owns the ROW but points it at A's ACCOUNT. Row-level
+# ownership alone would let B corrupt A's balance without ever reading it.
+#
+# The account id is fetched as the DB owner on purpose. An earlier version of
+# this test had B select the id itself, which returns nothing under RLS — so
+# the INSERT touched 0 rows and "passed" without ever attempting the attack.
+# A denial test that cannot reach the thing it is testing proves nothing.
+A_ACCT=$(as_owner "select id from public.accounts where user_id='$A' and account_type='prop_firm' limit 1;" | tr -d ' \n\r')
+expect_deny "B cannot attach a ledger row to A's account (id $A_ACCT)" "$B" "insert into public.account_ledger (user_id,account_id,kind,amount) values ('$B',$A_ACCT,'commission',-999);"
+expect_deny "B cannot forge a ledger row AS A"        "$B" "insert into public.account_ledger (user_id,account_id,kind,amount) values ('$A',$A_ACCT,'commission',-999);"
+expect_eq   "A's ledger untouched by B"               "$A" "select count(*) from public.account_ledger;" "1"
 
 echo
 echo "==> Reference data"
