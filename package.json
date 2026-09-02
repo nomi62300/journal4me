@@ -1,6 +1,6 @@
 {
   "name": "journal4me",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -10,7 +10,8 @@
     "db:start": "supabase start -x realtime,storage-api,imgproxy,studio,postgres-meta,edge-runtime,logflare,vector,supavisor,mailpit",
     "db:stop": "supabase stop",
     "db:reset": "supabase db reset --local",
-    "db:status": "supabase status"
+    "db:status": "supabase status",
+    "test:rls": "./scripts/rls-test.sh"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.5",

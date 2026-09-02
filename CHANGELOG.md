@@ -4,6 +4,33 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-09-02
+
+### Added
+- `accounts` — the first user-owned table. Carries per-account trading-day config
+  (`reset_timezone`, `reset_time`, `day_label_offset`, `pnl_attribution`), because the
+  same firm runs accounts on different servers with different midnights.
+- `public.own_active_account_count(text)` — takes no user id on purpose, so a caller
+  cannot probe another user's account count. RLS policy expressions run with the
+  caller's privileges, so it must be executable by `authenticated`.
+- `scripts/rls-test.sh` (`npm run test:rls`) — 17 assertions covering cross-tenant
+  isolation, entitlement enforcement, timezone validation and privilege escalation.
+
+### Notes
+- `current_balance` is deliberately NOT a column. Balance is derived from opening
+  balance + ledger + realised P&L. A stored balance drifts silently the moment a trade
+  is edited or deleted, and every drawdown floor is computed off balance — a stale one
+  is a wrong answer to "can I take this trade", not a cosmetic bug.
+- Plan limits are enforced in the RLS insert policy, so they cannot be bypassed by
+  calling PostgREST directly with a valid token.
+- Archiving an account frees its plan slot; a blown challenge stays as history rather
+  than being deleted, which would silently rewrite past analytics.
+- `broker_platform` is free text. Platforms churn, and a constraint that rejects a real
+  broker is a support ticket rather than a safeguard.
+- `expect_deny` in the test suite verifies the *specific* error (RLS/permission/timezone),
+  not merely that something failed. Self-checked by breaking an assertion: a bad table
+  name correctly reports FAIL rather than passing as a successful denial.
+
 ## [0.6.0] — 2026-09-02
 
 ### Added
