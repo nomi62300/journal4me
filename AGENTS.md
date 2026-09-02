@@ -43,6 +43,15 @@ personal and prop-firm accounts. See `docs/build-plan.md` for the full plan and
 - **Never store a path-dependent value.** High-water marks, drawdown floors, running
   balances and headroom are recomputed from an ordered day series on read. A stored HWM
   cannot be un-ratcheted when a backdated trade is edited or deleted.
+- **A count-based plan limit in a row-level `WITH CHECK` is bypassable by a single
+  multi-row `INSERT`.** The count function is `STABLE`, so one SQL command reads it once
+  against a snapshot taken before the statement's own new rows exist — every row's check
+  sees the same stale count. Proven on `accounts` (5 rows landed against a cap of 1) and
+  `trades` (a bulk insert landed at 42 against a cap of 30) before the fix. Any new
+  count-based limit needs an `AFTER INSERT ... FOR EACH STATEMENT` trigger, using a
+  transition table, that re-counts and rolls back the whole statement if any affected user
+  is over — see `20260902091542_statement_level_quota_enforcement.sql`. The row-level
+  check stays too, as a fast first-row rejection; it is real, just not sufficient alone.
 - **Secrets never enter the repo or client JS.** `.env*` is gitignored. Service-role and
   VAPID keys live in Supabase secrets only.
 

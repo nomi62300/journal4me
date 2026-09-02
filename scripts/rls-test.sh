@@ -53,7 +53,7 @@ expect_deny() {
   out=$(as_user "$u" "$s" 2>&1)
   if [[ $? -eq 0 ]]; then
     bad "$d (expected denial, but it SUCCEEDED)"
-  elif grep -qiE 'row-level security|permission denied|violates row-level|Unknown timezone|violates check constraint|duplicate key value|not found or not yours' <<<"$out"; then
+  elif grep -qiE 'row-level security|permission denied|violates row-level|Unknown timezone|violates check constraint|duplicate key value|not found or not yours|Plan limit exceeded' <<<"$out"; then
     ok "$d"
   else
     bad "$d (blocked, but by the WRONG error: $(grep -m1 ERROR <<<"$out"))"
@@ -78,9 +78,14 @@ mk_user() {
 }
 A=$(mk_user "rls_a_$(date +%s)@journal4me.test")
 B=$(mk_user "rls_b_$(date +%s)@journal4me.test")
-[[ -n "$A" && -n "$B" ]] || { echo "could not create test users — is the local stack running?"; exit 1; }
+# C is used only for the bulk-insert quota tests below, kept separate from A/B
+# so those assertions never depend on how many rows A or B have accumulated
+# earlier in the script.
+C=$(mk_user "rls_c_$(date +%s)@journal4me.test")
+[[ -n "$A" && -n "$B" && -n "$C" ]] || { echo "could not create test users — is the local stack running?"; exit 1; }
 echo "    A=$A"
 echo "    B=$B"
+echo "    C=$C"
 
 echo
 echo "==> Entitlements (free plan: 1 personal, 1 prop)"
@@ -138,8 +143,26 @@ expect_eq   "B sees none of A's trades"               "$B" "select count(*) from
 expect_deny "B cannot log a trade on A's account"     "$B" "insert into public.trades (user_id,account_id,symbol,direction,entry_price,size,entry_time) values ('$B',$A_ACCT2,'STEAL','long',100,1,now());"
 
 echo
+echo "==> Strategies"
+expect_ok   "A creates a strategy with a checklist" "$A" "insert into public.strategies (user_id,name,entry_criteria) values ('$A','ORB Breakout', array['HTF trend aligned','waited for retest']);"
+expect_eq   "B sees none of A's strategies"          "$B" "select count(*) from public.strategies;" "0"
+A_STRAT=$(as_owner "select id from public.strategies where user_id='$A' limit 1;" | tr -d ' \n\r')
+expect_ok   "A tags its own trade with its own strategy" "$A" "insert into public.trades (user_id,account_id,strategy_id,symbol,direction,entry_price,size,entry_time) values ('$A',$A_ACCT2,$A_STRAT,'STRAT','long',100,1,now());"
+# The real attack: B holds A's REAL strategy id (fetched as the DB owner, since
+# B cannot read it under RLS) and tries to tag its OWN trade with it. A test
+# where B looks up the id itself would silently attempt 0 rows and prove
+# nothing — the id must come from outside the attacker's own visibility.
+B_ACCT_FOR_STRAT=$(as_owner "select id from public.accounts where user_id='$B' limit 1;" | tr -d ' \n\r')
+expect_deny "B cannot tag its trade with A's strategy_id" "$B" "insert into public.trades (user_id,account_id,strategy_id,symbol,direction,entry_price,size,entry_time) values ('$B',$B_ACCT_FOR_STRAT,$A_STRAT,'STEAL','long',100,1,now());"
+
+echo
 echo "==> Monthly trade quota (free = 30)"
-expect_ok   "A fills up to the 30-trade cap"          "$A" "insert into public.trades (user_id,account_id,symbol,direction,entry_price,size,entry_time) select '$A',$A_ACCT2,'F'||g,'long',100,1,now() from generate_series(1,29) g;"
+# A already has 2 trades logged (from the Trades and Strategies blocks above),
+# so 28 more lands exactly at the 30-trade cap. This number is deliberately
+# exact rather than "enough to be over": the statement-level trigger added
+# below now correctly REJECTS a bulk insert that overshoots the cap in one
+# statement, so this must land AT the boundary, not past it.
+expect_ok   "A fills up to the 30-trade cap (2 existing + 28 more)" "$A" "insert into public.trades (user_id,account_id,symbol,direction,entry_price,size,entry_time) select '$A',$A_ACCT2,'F'||g,'long',100,1,now() from generate_series(1,28) g;"
 expect_deny "the 31st trade is blocked"               "$A" "insert into public.trades (user_id,account_id,symbol,direction,entry_price,size,entry_time) values ('$A',$A_ACCT2,'OVER','long',100,1,now());"
 expect_ok   "editing an existing trade still works at the cap" "$A" "update public.trades set notes='fixed' where symbol='ES';"
 
@@ -164,6 +187,32 @@ expect_ok   "A links a screenshot to its own trade"   "$A" "insert into public.t
 expect_deny "path must start with the owner's id"     "$A" "insert into public.trade_screenshots (user_id,trade_id,storage_path) values ('$A',$A_TRADE,'$B/1/wrong.png');"
 expect_deny "B cannot attach a screenshot to A's trade" "$B" "insert into public.trade_screenshots (user_id,trade_id,storage_path) values ('$B',$A_TRADE,'$B/1/x.png');"
 expect_eq   "B sees none of A's screenshots"          "$B" "select count(*) from public.trade_screenshots;" "0"
+
+echo
+echo "==> Journal entries"
+expect_ok   "A writes today's journal entry"         "$A" "insert into public.journal_entries (user_id,entry_date,pre_market_plan) values ('$A','2026-03-03','watch ES open');"
+expect_ok   "A edits the same day's entry"            "$A" "update public.journal_entries set post_session_review='worked' where user_id='$A' and entry_date='2026-03-03';"
+expect_deny "a second entry for the same day is rejected" "$A" "insert into public.journal_entries (user_id,entry_date,pre_market_plan) values ('$A','2026-03-03','duplicate');"
+expect_eq   "B sees none of A's journal"              "$B" "select count(*) from public.journal_entries;" "0"
+expect_deny "B cannot write a journal entry as A"     "$B" "insert into public.journal_entries (user_id,entry_date,pre_market_plan) values ('$A','2026-04-01','forged');"
+
+echo
+echo "==> Bulk-insert quota bypass (statement-level enforcement)"
+# own_active_account_count()/own_trade_count_this_month() are STABLE, so a
+# single multi-row INSERT sees one snapshot for the whole statement — every
+# row's WITH CHECK reads the SAME pre-statement count. A row-level RLS check
+# alone cannot catch this; it was caught here empirically (5 accounts landed
+# against a cap of 1, 42 trades against a cap of 30) before the statement-level
+# triggers now enforcing this were added. These assertions are the regression
+# guard, run against a FRESH user (C) so they never depend on how many rows A
+# or B have accumulated earlier in this script.
+expect_deny "bulk-inserting 5 accounts against a cap of 1 is rejected" "$C" "insert into public.accounts (user_id,name,account_type,starting_balance) select '$C','BulkAcct'||g,'personal',1000 from generate_series(1,5) g;"
+expect_eq   "the whole batch rolled back, not just the excess"        "$C" "select count(*) from public.accounts where user_id='$C';" "0"
+expect_ok   "C opens its one allowed personal account"                "$C" "insert into public.accounts (user_id,name,account_type,starting_balance) values ('$C','C Personal','personal',1000);"
+C_ACCT=$(as_owner "select id from public.accounts where user_id='$C' limit 1;" | tr -d ' \n\r')
+expect_ok   "a bulk insert of trades that STAYS under the cap succeeds"     "$C" "insert into public.trades (user_id,account_id,symbol,direction,entry_price,size,entry_time) select '$C',$C_ACCT,'OK'||g,'long',100,1,now() from generate_series(1,5) g;"
+expect_deny "bulk-inserting 50 more trades in one statement is rejected"    "$C" "insert into public.trades (user_id,account_id,symbol,direction,entry_price,size,entry_time) select '$C',$C_ACCT,'OVERBULK'||g,'long',100,1,now() from generate_series(1,50) g;"
+expect_eq   "the 50-row batch rolled back — C still at exactly 5"          "$C" "select count(*) from public.trades where user_id='$C';" "5"
 
 echo
 echo "==> Reference data"

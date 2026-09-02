@@ -4,6 +4,62 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] — 2026-09-02
+
+### Added
+- `strategies` — a trader's own playbook: name, description, rules text, and a
+  display-ordered `entry_criteria` checklist. `trades.strategy_id` added (nullable,
+  `on delete set null`) so a trade can be scored against one.
+- `journal_entries` — one notebook entry per user per calendar day (pre-market plan,
+  post-session review, mood, lessons). Not account-scoped: a trading day is journaled
+  once, not once per account. Unique on `(user_id, entry_date)`.
+- Both follow the `accounts` pattern exactly: `user_id`, RLS, four `_own` policies,
+  grants. No new entitlement dimension — the plan's `limits` jsonb has no count for
+  either, and inventing one nobody asked for is scope nobody needs yet.
+- 15 more assertions in `npm run test:rls` (now 60, up from 45).
+
+### Fixed — a real entitlement bypass, not a hypothetical
+Found while writing the strategy-ownership test, using the technique that has now
+caught three separate test flaws in this suite: fetch the attacker's target as the
+DB owner rather than letting the attacker's own (RLS-filtered) query supply it, so
+the attack actually reaches something.
+
+**A single multi-row `INSERT` could blow straight through both count-based plan
+limits.** Reproduced before any fix existed:
+
+```
+-- fresh user, 0 accounts, free cap = 1 personal account
+insert into accounts (...) select ... from generate_series(1,5) g;
+-- result: 5 rows inserted, cap of 1 fully bypassed
+
+-- user with 2 trades, free cap = 30/month
+insert into trades (...) select ... from generate_series(1,40) g;
+-- result: lands at 42 trades, cap of 30 fully bypassed
+```
+
+Cause: `own_active_account_count()` and `own_trade_count_this_month()` are `STABLE`.
+A single SQL command — including a multi-row `INSERT ... SELECT` — runs against one
+snapshot taken at the start of the command, so rows already inserted earlier in the
+SAME statement are invisible to a subquery evaluated for a later row of that
+statement. The RLS `WITH CHECK` genuinely re-runs per row, but every run sees the
+same stale count. This is exactly the shape of insert the CSV importer (M4) will
+generate, so it was never a theoretical adversarial-user concern.
+
+Fix: `20260902091542_statement_level_quota_enforcement.sql` adds an
+`AFTER INSERT ... FOR EACH STATEMENT` trigger on `accounts` and `trades`, using a
+transition table to see every row the statement added, that re-counts from the table
+itself — which an AFTER trigger does see correctly — and raises if any affected user
+is now over their limit. Raising rolls back the whole statement: a batch that
+overshoots fails entirely rather than partially, so nothing silently under-imports.
+The row-level `WITH CHECK` stays in place as a fast first-row rejection for the
+common single-row case; the statement-level trigger is the layer that is actually
+authoritative.
+
+Verified: both attacks above now roll back completely (accounts stays at 0, trades
+stays at 2), a bulk insert that stays under the cap still succeeds normally, and the
+fix is exercised by 5 new permanent assertions run against a dedicated fresh user so
+they never depend on another test's leftover trade count.
+
 ## [0.10.0] — 2026-09-02
 
 ### Added
