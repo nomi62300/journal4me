@@ -4,6 +4,47 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] — 2026-09-02
+
+### Added
+- Private `trade-screenshots` bucket (10 MB cap, image MIME types only) with path-scoped
+  storage policies: `trade-screenshots/{user_id}/{trade_id}/{filename}`.
+- `trade_screenshots` metadata table, with a CHECK tying `storage_path`'s first segment to
+  `user_id` so a row cannot point at a path its owner does not own.
+- 11 more assertions in `npm run test:rls` (now 45).
+
+### Notes
+- Storage is a **different RLS mechanism**: access is decided by parsing the object PATH,
+  not a `user_id` column. Getting it wrong does not throw — the wrong person just receives
+  the file, and here that file shows account balances and open positions.
+- The INSERT policy is the load-bearing one. The client chooses its own upload path, so
+  without a check on the first folder segment any authenticated user could write into
+  another user's folder. Checking only on SELECT would be too late.
+- UPDATE needs both USING and WITH CHECK, or a file could be renamed *into* someone else's
+  folder.
+- Policies parse the path rather than using `owner`: that column is nullable and unset on
+  some write paths, so a policy keyed on it would allow or deny depending on how the file
+  arrived.
+- The bucket is private. A public bucket serves any object to anyone holding the URL with
+  no policy evaluated at all. Reads go through short-lived signed URLs.
+
+### Known limitation
+- **`anon` and `authenticated` retain TRUNCATE on `storage.objects` and we cannot revoke it
+  from a migration.** The grant was made by `supabase_storage_admin`, Postgres only lets a
+  role revoke grants it made, and `postgres` is not a superuser on Supabase
+  (`rolsuper = false`). `GRANTED BY` errors, `SET ROLE` errors, and a plain revoke reports
+  success while changing nothing — so the attempt is documented in the migration rather
+  than left as code that looks like protection and is not.
+  Not currently reachable: TRUNCATE needs arbitrary SQL, and PostgREST exposes only
+  `public` and `graphql_public`, so the storage schema has no REST surface. Fix belongs in
+  the self-hosted runbook, where we control `supabase_admin`.
+
+### Fixed
+- Two more tests that asserted the wrong thing: the bucket-privacy check ran as
+  `authenticated`, which correctly cannot read `storage.buckets` at all, so it compared
+  against an empty string. Now checked as the DB owner, with a separate assertion that
+  clients cannot enumerate buckets.
+
 ## [0.9.0] — 2026-09-02
 
 ### Added

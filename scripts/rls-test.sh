@@ -144,6 +144,28 @@ expect_deny "the 31st trade is blocked"               "$A" "insert into public.t
 expect_ok   "editing an existing trade still works at the cap" "$A" "update public.trades set notes='fixed' where symbol='ES';"
 
 echo
+echo "==> Storage (path-scoped, a different RLS mechanism)"
+# Checked as the DB owner: `authenticated` deliberately cannot read
+# storage.buckets at all (RLS on, no policies), so a client cannot enumerate
+# buckets. Asserted separately below.
+BUCKET_PUBLIC=$(as_owner "select public::text from storage.buckets where id='trade-screenshots';" | tr -d ' \n\r')
+if [[ "$BUCKET_PUBLIC" == "false" ]]; then ok "bucket is PRIVATE"; else bad "bucket is PRIVATE (got '$BUCKET_PUBLIC')"; fi
+expect_eq   "clients cannot enumerate buckets"        "$A" "select count(*) from storage.buckets;" "0"
+expect_ok   "A uploads into its own folder"           "$A" "insert into storage.objects (bucket_id,name) values ('trade-screenshots','$A/1/setup.png');"
+expect_deny "A cannot upload into B's folder"         "$A" "insert into storage.objects (bucket_id,name) values ('trade-screenshots','$B/1/steal.png');"
+expect_eq   "B sees none of A's objects"              "$B" "select count(*) from storage.objects where bucket_id='trade-screenshots';" "0"
+expect_eq   "B cannot rename A's file into its folder" "$B" "with u as (update storage.objects set name='$B/1/stolen.png' where bucket_id='trade-screenshots' returning 1) select count(*) from u;" "0"
+expect_eq   "A's object survived"                     "$A" "select count(*) from storage.objects where bucket_id='trade-screenshots';" "1"
+
+echo
+echo "==> Screenshot metadata"
+A_TRADE=$(as_owner "select id from public.trades where user_id='$A' and symbol='ES' limit 1;" | tr -d ' \n\r')
+expect_ok   "A links a screenshot to its own trade"   "$A" "insert into public.trade_screenshots (user_id,trade_id,storage_path) values ('$A',$A_TRADE,'$A/1/setup.png');"
+expect_deny "path must start with the owner's id"     "$A" "insert into public.trade_screenshots (user_id,trade_id,storage_path) values ('$A',$A_TRADE,'$B/1/wrong.png');"
+expect_deny "B cannot attach a screenshot to A's trade" "$B" "insert into public.trade_screenshots (user_id,trade_id,storage_path) values ('$B',$A_TRADE,'$B/1/x.png');"
+expect_eq   "B sees none of A's screenshots"          "$B" "select count(*) from public.trade_screenshots;" "0"
+
+echo
 echo "==> Reference data"
 expect_eq   "plans readable by a signed-in user"   "$A" "select count(*) from public.plans;" "2"
 expect_eq   "subscriptions table readable, empty"  "$A" "select count(*) from public.subscriptions;" "0"
