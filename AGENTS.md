@@ -92,6 +92,42 @@ personal and prop-firm accounts. See `docs/build-plan.md` for the full plan and
 - Request APIs (`cookies()`, `headers()`, `params`, `searchParams`) are async.
 - Turbopack is the default bundler.
 
+## React 19 forms: never bind `<form action={fn}>` for anything but the trivial case
+
+**Every form with more than one or two plain text fields uses `onSubmit` + `startTransition`,
+never `<form action={fn}>`.** Found live, confirmed by reading react-dom's own source
+(`startHostTransition` → `requestFormReset$1`, not inferred from symptoms):
+
+- `<form action={fn}>` makes React attach a native submit-event listener that calls
+  `requestFormReset()` on the DOM form **before the action even runs — every submission,
+  success or failure.** That resets every `defaultValue`-based field to its mount-time value.
+  A validation error used to silently wipe half a form while the user saw one vague error.
+  **Fix:** every field controlled (`useState` + `value` + `onChange`), never `defaultValue`,
+  for anything that must survive a failed submit.
+- **Controlled state is not sufficient for `<Select>`.** Radix's `Select` renders a hidden
+  native `<select>` for form/autofill participation, and `requestFormReset` resets THAT too —
+  which propagates back through `onValueChange` and genuinely clears the controlled state, not
+  just its display. Proved live: a Select held the correct value, submitted it correctly on a
+  failing attempt, then failed on itself on the very next attempt with **no user interaction on
+  that field at all**. Controlled state doesn't fix this one — only avoiding the `action=`
+  binding does.
+- **The fix:** `<form onSubmit={(e) => { e.preventDefault(); /* build FormData from state */;
+  startTransition(() => formAction(fd)); }}>`. Calling `useActionState`'s dispatch manually
+  inside `startTransition` — the pattern React's own docs describe as the alternative to a
+  form-action binding — never goes through the native submit-listener path, so
+  `requestFormReset` never fires. See `trade-form.tsx` and `account-edit-form.tsx` for the
+  reference implementation, including the two-field-name gotcha this required (submitting a
+  manually-built `FormData`, not one collected from the live DOM, means every value — including
+  every tag from a `TagInput` — must be added explicitly; nothing is collected for free).
+- The wizard (`account-wizard.tsx`) was never affected — it already used `onSubmit` +
+  react-hook-form, not `action=`. `auth-form.tsx`'s two plain fields are also fine as-is: no
+  `<Select>` involved, and the one `defaultValue` field (`email`) is verified working via the
+  echo-back pattern already documented there.
+- **When testing any form live:** verify a `<Select>`'s value with the hidden native
+  `<select>`'s own `.value` (`document.querySelector('form select').value`), not the visible
+  trigger text — the open dropdown's own listbox can visually overlap the trigger and be
+  mistaken for a committed selection.
+
 ## Commit discipline
 
 Every shipped change gets its own commit with a `CHANGELOG.md` entry (Keep a Changelog

@@ -1,14 +1,22 @@
 "use client";
 
 /**
- * A single-page edit form, unlike the wizard's multi-step react-hook-form
- * setup. This mirrors auth-form.tsx's native <form action> + useActionState
- * pattern deliberately: there is no "validate this step before advancing"
- * need here, just one submit, so the simpler pattern already established for
- * auth is the right one to reuse rather than pulling in RHF for one page.
+ * A single-page edit form. useActionState still supplies pending/state, but
+ * submission goes through onSubmit, not the DOM form's own `action` prop —
+ * see the identical, more detailed comment in trade-form.tsx for the full
+ * story. Short version, confirmed by reading react-dom's source rather than
+ * assumed: `<form action={fn}>` makes React call requestFormReset() before
+ * the action runs, on every submit, success or failure. That does not just
+ * wipe defaultValue-based inputs (which controlled state alone fixes) — it
+ * also resets Radix <Select>'s internal hidden native <select>, and that
+ * reset propagates back through onValueChange and genuinely clears
+ * controlled state too. Found live on this exact form: the Primary Market
+ * select held its value, submitted correctly on a failing attempt, then
+ * failed on itself on the very next attempt with no user interaction on it
+ * at all. Avoiding the action-prop binding is what actually fixes it.
  */
 
-import { useActionState } from "react";
+import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -38,29 +46,43 @@ import {
   type Account,
 } from "@/lib/accounts/types";
 import { formatResetTime } from "@/lib/format";
-import { useEffect, useRef, useState } from "react";
 
 export function AccountEditForm({ account }: { account: Account }) {
   const updateForThisAccount = updateAccount.bind(null, account.id);
-  const [state, formAction, pending] = useActionState<
+  const [state, formAction, actionPending] = useActionState<
     AccountFormState,
     FormData
   >(updateForThisAccount, {});
+  const [transitionPending, startTransition] = useTransition();
+  const pending = actionPending || transitionPending;
 
+  const [name, setName] = useState(account.name);
+  const [propFirmName, setPropFirmName] = useState(account.prop_firm_name ?? "");
+  const [brokerPlatform, setBrokerPlatform] = useState(account.broker_platform ?? "");
+  const [startingBalance, setStartingBalance] = useState(String(account.starting_balance));
+  const [currency, setCurrency] = useState(account.currency);
   const [timezone, setTimezone] = useState(account.reset_timezone);
+  const [resetTime, setResetTime] = useState(formatResetTime(account.reset_time));
   const [offset, setOffset] = useState<string>(String(account.day_label_offset));
   const [market, setMarket] = useState(account.primary_market ?? "");
 
   return (
     <form
-      action={(fd) => {
-        // Controlled inputs (combobox, selects) aren't native form fields, so
-        // their values aren't in the FormData a plain submit would collect.
-        // Set them explicitly before handing off to the server action.
+      onSubmit={(e) => {
+        e.preventDefault();
+        const fd = new FormData();
+        fd.set("name", name);
+        fd.set("prop_firm_name", propFirmName);
+        fd.set("broker_platform", brokerPlatform);
+        fd.set("starting_balance", startingBalance);
+        fd.set("currency", currency);
         fd.set("reset_timezone", timezone);
+        fd.set("reset_time", resetTime);
         fd.set("day_label_offset", offset);
         fd.set("primary_market", market);
-        return formAction(fd);
+        startTransition(() => {
+          formAction(fd);
+        });
       }}
     >
       <FieldGroup>
@@ -74,8 +96,8 @@ export function AccountEditForm({ account }: { account: Account }) {
           <FieldLabel htmlFor="e-name">Account name</FieldLabel>
           <Input
             id="e-name"
-            name="name"
-            defaultValue={account.name}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
             disabled={pending}
             aria-invalid={!!state.fieldErrors?.name}
           />
@@ -89,9 +111,9 @@ export function AccountEditForm({ account }: { account: Account }) {
             <FieldLabel htmlFor="e-firm">Firm</FieldLabel>
             <Input
               id="e-firm"
-              name="prop_firm_name"
               list="prop-firm-options-edit"
-              defaultValue={account.prop_firm_name ?? ""}
+              value={propFirmName}
+              onChange={(e) => setPropFirmName(e.target.value)}
               disabled={pending}
             />
             <datalist id="prop-firm-options-edit">
@@ -109,9 +131,9 @@ export function AccountEditForm({ account }: { account: Account }) {
           </FieldLabel>
           <Input
             id="e-platform"
-            name="broker_platform"
             list="broker-platform-options-edit"
-            defaultValue={account.broker_platform ?? ""}
+            value={brokerPlatform}
+            onChange={(e) => setBrokerPlatform(e.target.value)}
             disabled={pending}
           />
           <datalist id="broker-platform-options-edit">
@@ -145,16 +167,13 @@ export function AccountEditForm({ account }: { account: Account }) {
             <FieldLabel htmlFor="e-balance">Starting balance</FieldLabel>
             <Input
               id="e-balance"
-              name="starting_balance"
               type="number"
               inputMode="decimal"
               step="0.01"
               min="0"
-              defaultValue={account.starting_balance}
+              value={startingBalance}
+              onChange={(e) => setStartingBalance(e.target.value)}
               disabled={pending}
-              // See the matching comment in account-wizard.tsx: without this,
-              // typing into a field already showing a real number appends
-              // instead of replacing it.
               onFocus={(e) => e.currentTarget.select()}
               aria-invalid={!!state.fieldErrors?.starting_balance}
             />
@@ -170,10 +189,10 @@ export function AccountEditForm({ account }: { account: Account }) {
             <FieldLabel htmlFor="e-currency">Currency</FieldLabel>
             <Input
               id="e-currency"
-              name="currency"
               maxLength={3}
               className="uppercase"
-              defaultValue={account.currency}
+              value={currency}
+              onChange={(e) => setCurrency(e.target.value)}
               disabled={pending}
               aria-invalid={!!state.fieldErrors?.currency}
             />
@@ -198,9 +217,9 @@ export function AccountEditForm({ account }: { account: Account }) {
             />
             <Input
               type="time"
-              name="reset_time"
               className="w-28"
-              defaultValue={formatResetTime(account.reset_time)}
+              value={resetTime}
+              onChange={(e) => setResetTime(e.target.value)}
               disabled={pending}
             />
           </div>

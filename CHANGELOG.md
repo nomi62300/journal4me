@@ -4,6 +4,72 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] — 2026-09-02
+
+### Added — M3: Trades (entry, log, detail, screenshots)
+- `trades` data layer: types, Zod schema mirroring every DB constraint (including the
+  closed-shape and stop-side checks client-side, ahead of the database's own), queries with
+  relational embedding (`accounts(name,currency)`, `strategies(name)`), and server actions.
+- `TradeForm` — one form for create and edit. An "is closed" switch reveals exit fields;
+  the Net Result field shows a live gross-P&L estimate (`(exit−entry)×size`, sign-flipped
+  for shorts) with a one-click "Use this", but never auto-fills — the schema's own design
+  (`pnl` is always net, fees are informational and never subtracted again) is the form's
+  design too.
+- `/trades` — filterable list (account, status, symbol — debounced), table on desktop,
+  cards on mobile, sharing one data source. `/trades/new`, `/trades/[id]` (summary + inline
+  edit + delete-with-confirmation).
+- Screenshot upload/display/delete against the private `trade-screenshots` bucket
+  (built in M1): path convention enforced client-side to match the DB's
+  `trade_screenshots_path_matches_owner` check, signed URLs (1-hour), delete removes the
+  metadata row first so a storage failure never leaves a broken-image reference.
+- Local dev stack now includes `storage-api` (`npm run db:start`), needed for the above —
+  excluded in M1 since nothing used it yet.
+- `TimezoneCombobox`'s cmdk search now matches "New York" as well as the raw
+  `America/New_York` id, via cmdk's own `keywords` prop (same class of fix as the wizard's
+  timezone search in M2, found again independently here).
+
+### Fixed — two serious React 19 form bugs, found live, root-caused via react-dom's own source
+Both trace to `requestFormReset()`, which `<form action={fn}>` calls unconditionally before
+running the action, every submission, success or failure. Full writeup in `AGENTS.md`
+("React 19 forms") since this is now a standing convention, not a one-off fix.
+
+1. **Any `defaultValue`-based field was wiped on every submit.** A single missing required
+   field on this trade form used to blank symbol, entry time, stop loss and every other
+   uncontrolled field back to empty, while the user saw one vague "Check the highlighted
+   fields." — their entry gone with no indication why. Fixed by converting every field on
+   `TradeForm` AND `AccountEditForm` (found to have the identical latent bug once the pattern
+   was understood) to controlled state.
+2. **Controlled state alone does not protect `<Select>`.** Radix's `Select` renders a hidden
+   native `<select>` for form/autofill participation; `requestFormReset` resets THAT too, and
+   the reset propagates back through `onValueChange` — genuinely clearing controlled state,
+   not just its display. Proved live: a Select held the correct account, submitted it
+   correctly on a failing attempt (another field was invalid), then failed **on itself** on
+   the very next attempt with no interaction on it at all. Root-caused by reading
+   `react-dom`'s `requestFormReset$1`/`startHostTransition`, which fire specifically from the
+   native submit-listener React attaches because of the `action=` prop — never inferred from
+   behaviour alone. Fixed by switching both forms from `<form action={fn}>` to
+   `<form onSubmit={...}>` + `startTransition(() => formAction(fd))`, the pattern React's own
+   docs describe as the supported alternative — this path never touches the native
+   submit-listener, so `requestFormReset` never fires.
+
+### Verified live
+Full create flow for both an open and a closed trade (long AND short direction), including:
+- `r_multiple` and `risk_amount` generated columns checked against hand-computed values
+  (short GBPUSD 1.2700→1.2650 size 5000, stop 1.2750: risk $25.00, pnl $25.00, **1.00R** —
+  matches exactly).
+- The gross-P&L estimate verified correct for both directions.
+- Commission stored and displayed separately, confirmed NOT subtracted from `pnl`.
+- A deliberate validation failure (missing `entry_time`) with a properly-selected account,
+  confirmed via the hidden native `<select>`'s own value (not the visible trigger text, which
+  can show an open-but-uncommitted dropdown overlapping the trigger) — then a second,
+  successful submission with **no further interaction with the Select at all**.
+- Screenshot upload confirmed via direct inspection of `trade_screenshots` and
+  `storage.objects` (a synthesized 1×1 PNG injected via the `DataTransfer` API, since this
+  environment has no native file-picker automation); delete confirmed to remove both rows.
+- Trade list table (desktop) and card list (mobile, 375px, no horizontal scroll) both
+  rendering the same data correctly.
+- All 72 RLS/entitlement assertions still pass unchanged.
+
 ## [0.13.0] — 2026-09-02
 
 ### Added — M2: Accounts UI + onboarding wizard

@@ -24,7 +24,7 @@ export type NavItem = {
 export const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, mobile: true },
   { href: "/accounts", label: "Accounts", icon: Wallet, mobile: true },
-  { href: "/trades", label: "Trades", icon: LineChart, mobile: true, comingSoon: true },
+  { href: "/trades", label: "Trades", icon: LineChart, mobile: true },
   { href: "/journal", label: "Journal", icon: BookOpen, mobile: true, comingSoon: true },
   { href: "/strategies", label: "Strategies", icon: Target, comingSoon: true },
   { href: "/analytics", label: "Analytics", icon: BarChart3, comingSoon: true },

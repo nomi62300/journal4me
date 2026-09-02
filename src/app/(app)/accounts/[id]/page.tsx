@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { ArchiveRestore, Archive, ArrowLeft } from "lucide-react";
+import { ArchiveRestore, Archive, ArrowLeft, LineChart } from "lucide-react";
 
 import { AccountEditForm } from "@/components/accounts/account-edit-form";
 import { DeleteAccountDialog } from "@/components/accounts/delete-account-dialog";
@@ -125,6 +125,12 @@ export default async function AccountDetailPage({
           <Separator />
 
           <div className="flex flex-wrap gap-2 pt-1">
+            <Button asChild variant="outline" size="sm" className="gap-1.5">
+              <Link href={`/trades/new?account=${account.id}`}>
+                <LineChart className="size-4" />
+                Log a trade
+              </Link>
+            </Button>
             <form action={toggleArchived}>
               <Button type="submit" variant="outline" size="sm" className="gap-1.5">
                 {account.is_archived ? (
