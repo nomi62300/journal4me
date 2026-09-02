@@ -127,6 +127,23 @@ expect_deny "B cannot forge a ledger row AS A"        "$B" "insert into public.a
 expect_eq   "A's ledger untouched by B"               "$A" "select count(*) from public.account_ledger;" "1"
 
 echo
+echo "==> Trades"
+A_ACCT2=$(as_owner "select id from public.accounts where user_id='$A' and account_type='prop_firm' limit 1;" | tr -d ' \n\r')
+expect_ok   "A logs a trade on its own account"       "$A" "insert into public.trades (user_id,account_id,symbol,direction,entry_price,stop_loss_price,size,entry_time,exit_time,exit_price,pnl) values ('$A',$A_ACCT2,'ES','long',100,98,10,now()-interval '2 hours',now(),104,40);"
+expect_eq   "r_multiple computed (40 / (2*10) = 2)"   "$A" "select round(r_multiple,4) from public.trades where symbol='ES';" "2.0000"
+expect_eq   "open_day stamped"                        "$A" "select count(*) from public.trades where open_day is not null;" "1"
+expect_deny "stop on the wrong side is rejected"      "$A" "insert into public.trades (user_id,account_id,symbol,direction,entry_price,stop_loss_price,size,entry_time) values ('$A',$A_ACCT2,'BAD','long',100,105,1,now());"
+expect_deny "exit_time without pnl is rejected"       "$A" "insert into public.trades (user_id,account_id,symbol,direction,entry_price,size,entry_time,exit_time) values ('$A',$A_ACCT2,'BAD2','long',100,1,now(),now());"
+expect_eq   "B sees none of A's trades"               "$B" "select count(*) from public.trades;" "0"
+expect_deny "B cannot log a trade on A's account"     "$B" "insert into public.trades (user_id,account_id,symbol,direction,entry_price,size,entry_time) values ('$B',$A_ACCT2,'STEAL','long',100,1,now());"
+
+echo
+echo "==> Monthly trade quota (free = 30)"
+expect_ok   "A fills up to the 30-trade cap"          "$A" "insert into public.trades (user_id,account_id,symbol,direction,entry_price,size,entry_time) select '$A',$A_ACCT2,'F'||g,'long',100,1,now() from generate_series(1,29) g;"
+expect_deny "the 31st trade is blocked"               "$A" "insert into public.trades (user_id,account_id,symbol,direction,entry_price,size,entry_time) values ('$A',$A_ACCT2,'OVER','long',100,1,now());"
+expect_ok   "editing an existing trade still works at the cap" "$A" "update public.trades set notes='fixed' where symbol='ES';"
+
+echo
 echo "==> Reference data"
 expect_eq   "plans readable by a signed-in user"   "$A" "select count(*) from public.plans;" "2"
 expect_eq   "subscriptions table readable, empty"  "$A" "select count(*) from public.subscriptions;" "0"

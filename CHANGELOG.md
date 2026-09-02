@@ -4,6 +4,41 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] — 2026-09-02
+
+### Added
+- `trades` — the core record. Day-stamped (`open_day` / `close_day`) by trigger from the
+  account's reset config, with generated `risk_amount`, `r_multiple` and `is_open`.
+- Monthly trade quota enforced in the RLS insert policy (`own_trade_count_this_month()`).
+- 10 more assertions in `npm run test:rls` (now 34).
+
+### Notes
+- **`pnl` is always NET.** The fee columns beside it are an informational breakdown, never
+  operands. Storing gross and subtracting on read invites the worst bug in this category:
+  a broker exporting net P&L imported into a gross column has its costs subtracted twice,
+  making every downstream number — drawdown, expectancy, distance-to-breach — optimistic
+  by the commission drag. Optimistic is the dangerous direction; it shows headroom that is
+  not there. Corollary: costs already inside a trade's `pnl` must not also be logged in
+  `account_ledger`, which is for separately billed costs only.
+- `r_multiple` is NULL when there was no stop, not zero. An unknown R and a break-even R
+  are different facts, and averaging them together understates a strategy's edge.
+- Both `open_day` and `close_day` are stored. `close_day` drives P&L attribution, but
+  `open_day` is what reveals a position floating across a day boundary — the exact case
+  where an equity-based daily loss rule can be breached with no closed trade showing it.
+- The monthly quota counts by `created_at` (when logged), not `entry_time` (when traded).
+  Counting by trade date would let anyone bypass the limit by back-dating.
+- Updates are deliberately exempt from the quota: correcting a record is not consuming more
+  service, and gating it would strand a free user at the cap with uncorrectable typos.
+
+### Verified
+- R-multiple against hand-computed values: long 100/98 size 10, +40 net → 2.0; short
+  100/102 size 5, −10 → −1.0; no stop → NULL.
+- Constraints reject a stop on the wrong side of entry and a trade with an exit time but
+  no P&L.
+- Editing an exit across the 17:00 boundary re-buckets `close_day` from the 3rd to the 4th.
+- Generated columns cannot reference one another (checked on this database), so the risk
+  expression is inlined in `r_multiple` rather than reused.
+
 ## [0.8.0] — 2026-09-02
 
 ### Added
