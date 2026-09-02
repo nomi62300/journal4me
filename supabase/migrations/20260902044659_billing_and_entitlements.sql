@@ -200,6 +200,12 @@ grant execute on function public.plan_allows(uuid, text) to authenticated, servi
 -- "one of each" cannot be expressed as a single number, and a prop trader
 -- juggling several challenges is exactly who should be on Pro.
 --
+-- `data_export` is true on BOTH tiers, deliberately. Everything else in the
+-- Pro column adds capability; withholding export would instead withhold the
+-- user's own data back from them. GDPR Art. 20 gives EU users a portability
+-- right over data they supplied, and this audience will notice the app is
+-- self-hostable. Export is a trust feature, not a paid one.
+--
 -- Prices are placeholders until pricing is decided; is_active gates what the
 -- pricing page shows, so a tier can exist for testing without being sold.
 insert into public.plans
@@ -209,7 +215,7 @@ values
    0, 'month', 0,
    '{"max_personal_accounts": 1, "max_prop_accounts": 1, "max_trades_per_month": 30,
      "csv_import": false, "push_notifications": false, "prop_rule_engine": true,
-     "data_export": false}'::jsonb),
+     "data_export": true}'::jsonb),
   ('pro', 'Pro', 'Every account, unlimited history, imports and alerts.',
    0, 'month', 1,
    '{"max_personal_accounts": -1, "max_prop_accounts": -1, "max_trades_per_month": -1,
