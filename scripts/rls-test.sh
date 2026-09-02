@@ -215,6 +215,36 @@ expect_deny "bulk-inserting 50 more trades in one statement is rejected"    "$C"
 expect_eq   "the 50-row batch rolled back — C still at exactly 5"          "$C" "select count(*) from public.trades where user_id='$C';" "5"
 
 echo
+echo "==> account_balance() — money math gets checked too"
+# Reuses C's account from the bulk-insert block above, deliberately: C's only
+# activity there was 5 trades with no exit_time/pnl (still open), so the
+# balance must be EXACTLY the starting balance with nothing else touching it —
+# unlike A's accounts, which already carry a realised trade and a commission
+# from earlier blocks and would make the expected number a moving target.
+expect_eq   "starting balance, only OPEN trades so far (unaffected)" "$C" "select public.account_balance($C_ACCT);" "1000"
+expect_ok   "C adds a -300 ledger movement"            "$C" "insert into public.account_ledger (user_id,account_id,kind,amount) values ('$C',$C_ACCT,'withdrawal_payout',-300);"
+expect_eq   "balance reflects the ledger movement"     "$C" "select public.account_balance($C_ACCT);" "700"
+expect_eq   "B cannot read C's balance (null, not an error or 0)" "$B" "select coalesce(public.account_balance($C_ACCT)::text,'NULL');" "NULL"
+
+echo
+echo "==> Unarchive / relabel quota bypass (a second statement-level gap)"
+# The INSERT-side fix above does not cover this: archive -> create -> archive
+# again legitimately leaves 2 archived personal accounts under a cap of 1,
+# and unarchiving BOTH in one UPDATE used to slip through, because
+# accounts_update_own never re-checked the plan limit at all — only INSERT
+# did. A second trigger (after every UPDATE) closes it. Uses a fresh user (E)
+# so it is not coupled to C's state from the block above.
+E=$(mk_user "rls_e_$(date +%s)@journal4me.test")
+expect_ok   "E creates and archives a personal account (P1)"  "$E" "insert into public.accounts (user_id,name,account_type,starting_balance) values ('$E','P1','personal',1000); update public.accounts set is_archived=true where user_id='$E' and name='P1';"
+expect_ok   "E creates and archives a second one (P2)"        "$E" "insert into public.accounts (user_id,name,account_type,starting_balance) values ('$E','P2','personal',1000); update public.accounts set is_archived=true where user_id='$E' and name='P2';"
+expect_deny "unarchiving BOTH in one statement is rejected"   "$E" "update public.accounts set is_archived=false where user_id='$E' and account_type='personal';"
+expect_eq   "the batch rolled back — E still has 0 active"    "$E" "select count(*) from public.accounts where user_id='$E' and not is_archived;" "0"
+expect_ok   "unarchiving just ONE stays within the cap"       "$E" "update public.accounts set is_archived=false where user_id='$E' and name='P1';"
+expect_ok   "E opens a prop_firm account too (separate bucket)" "$E" "insert into public.accounts (user_id,name,account_type,starting_balance) values ('$E','Prop A','prop_firm',50000);"
+expect_deny "relabelling prop_firm -> personal to launder capacity is rejected" "$E" "update public.accounts set account_type='personal' where user_id='$E' and name='Prop A';"
+expect_ok   "an ordinary rename (no cap change) still works"  "$E" "update public.accounts set name='P1 renamed' where user_id='$E' and name='P1';"
+
+echo
 echo "==> Reference data"
 expect_eq   "plans readable by a signed-in user"   "$A" "select count(*) from public.plans;" "2"
 expect_eq   "subscriptions table readable, empty"  "$A" "select count(*) from public.subscriptions;" "0"

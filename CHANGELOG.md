@@ -4,6 +4,53 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] — 2026-09-02
+
+### Added
+- `accounts.prop_firm_name` — a free-text label so a prop account can be identified
+  (e.g. "FTMO") ahead of the versioned `prop_firm_profiles` schema landing in M6.
+- `public.account_balance(account_id)` — starting balance + ledger + realised trade P&L,
+  computed on read. Explicitly NOT the rule engine: a flat, order-independent sum, not a
+  path-dependent high-water mark or drawdown floor. `SECURITY INVOKER` so it inherits RLS
+  from every table it touches — asking for someone else's account returns `null`, not a
+  number.
+- 8 more assertions in `npm run test:rls` (now 72, up from 60).
+
+### Fixed — a second real entitlement bypass
+Found while building the accounts UI's archive toggle, before shipping it: the INSERT-side
+quota fix from v0.11.0 did not cover **UPDATE**, and unarchiving is an UPDATE. Reproduced
+with nothing adversarial — the ordinary archive/create/archive cycle any user could do:
+
+```
+create P1 (1 active, at cap of 1)
+archive P1 (0 active, slot freed)
+create P2 (1 active, at cap again — legitimate)
+archive P2 (0 active)
+update accounts set is_archived = false where account_type = 'personal';
+-- result: 2 active personal accounts. Cap of 1 fully bypassed.
+```
+
+A second face of the same gap: `accounts_update_own` never restricted which columns may
+change, so nothing stopped relabelling `account_type` directly (`personal ↔ prop_firm`) to
+launder capacity between the two buckets — the app's own edit form doesn't expose that
+field, but RLS is supposed to be the real boundary, not what the UI happens to offer.
+
+Fix: a second `AFTER UPDATE` trigger reusing `enforce_account_quota()` from v0.11.0 — it
+already re-counts from a transition table per affected `(user_id, account_type)`, which is
+exactly correct for both an unarchived row (now `is_archived = false`) and a relabelled one
+(now under its new `account_type`).
+
+One implementation snag, caught by Postgres itself rather than assumed: `AFTER UPDATE OF
+is_archived, account_type ... REFERENCING NEW TABLE` is rejected outright —
+**"transition tables cannot be specified for triggers with column lists."** The trigger
+fires on every UPDATE instead; the check is one cheap statement-level aggregate per
+affected user/type, not a per-row cost, so nothing here is worth narrowing further.
+
+Verified: both the unarchive-both-at-once and the relabel-to-launder attacks now roll back
+completely, unarchiving a single row while still under cap succeeds normally, and an
+ordinary rename is unaffected. `AGENTS.md` now asks, for every future count-based limit,
+both "can INSERT exceed it" and "can UPDATE move a row into the counted set."
+
 ## [0.11.0] — 2026-09-02
 
 ### Added

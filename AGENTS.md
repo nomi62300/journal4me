@@ -52,6 +52,18 @@ personal and prop-firm accounts. See `docs/build-plan.md` for the full plan and
   transition table, that re-counts and rolls back the whole statement if any affected user
   is over — see `20260902091542_statement_level_quota_enforcement.sql`. The row-level
   check stays too, as a fast first-row rejection; it is real, just not sufficient alone.
+- **The INSERT-side fix above is not enough on its own — check UPDATE too.** A row can
+  become newly-over-cap without any INSERT at all: unarchiving (`is_archived: true → false`)
+  or relabelling a type column both change which bucket a row counts against, and neither
+  goes through `accounts_insert_own`. Proven: archive → create → archive again legitimately
+  leaves 2 archived rows under a cap of 1, and unarchiving both in one `UPDATE` used to slip
+  through completely — no adversarial trick, just the ordinary archive toggle. A
+  column-restricted `AFTER UPDATE OF ... REFERENCING NEW TABLE` trigger is also rejected
+  outright by Postgres ("transition tables cannot be specified for triggers with column
+  lists") — fire on every UPDATE instead; the check is one cheap statement-level aggregate,
+  not a per-row cost. See `20260902094153_prevent_unarchive_quota_bypass.sql`. **Whenever a
+  count-based limit exists, ask both questions: can INSERT exceed it, and can UPDATE move a
+  row into the counted set?**
 - **Secrets never enter the repo or client JS.** `.env*` is gitignored. Service-role and
   VAPID keys live in Supabase secrets only.
 
