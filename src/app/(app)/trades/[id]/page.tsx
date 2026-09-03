@@ -12,6 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { TradeChart } from "@/components/trades/trade-chart";
 import { TradeForm } from "@/components/trades/trade-form";
 import { TradeScreenshots } from "@/components/trades/trade-screenshots";
 import { DeleteTradeDialog } from "@/components/trades/delete-trade-dialog";
@@ -187,6 +188,13 @@ export default async function TradeDetailPage({
             <p className="text-muted-foreground border-t pt-3 text-sm whitespace-pre-wrap">
               {trade.notes}
             </p>
+          ) : null}
+
+          {!trade.is_open && trade.asset_class === "crypto" ? (
+            <>
+              <Separator />
+              <TradeChart tradeId={trade.id} />
+            </>
           ) : null}
 
           <Separator />

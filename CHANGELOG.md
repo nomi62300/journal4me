@@ -4,6 +4,68 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.35.0] — 2026-09-03
+
+### Added — M9e: auto-generated trade charts (crypto only)
+- **A real candlestick chart on every closed crypto trade**, with entry/exit arrow markers and
+  dashed stop-loss/take-profit price lines — the feature Tradervue is actually known for,
+  un-deferred from the *original* build plan (which specced TradingView Lightweight Charts for
+  equity/drawdown curves before v1 cut all external OHLC data for cost/complexity reasons).
+  Scoped to crypto only, per the owner's own decision when this was planned: Binance's public
+  klines endpoint is genuinely free and reliable for crypto; forex/indices/commodities have no
+  comparably free intraday data source, so those keep manual screenshots.
+- **`lightweight-charts@5.2.1`** — new dependency, Apache-2.0 with an attribution requirement
+  (the visible TradingView watermark satisfies this; do not remove it). v5's API was verified
+  against the package's own shipped `.d.ts` before writing any code, not assumed from training
+  data or v4-era docs: series creation is `chart.addSeries(CandlestickSeries, options)` (an
+  imported series-type token, not a string), markers are a separate
+  `createSeriesMarkers(series, markers)` plugin call (not `series.setMarkers()`, which was v4's
+  API and no longer exists), and price lines are `series.createPriceLine({price, ...})`.
+- **`src/lib/charts/binance.ts`** — `normalizeToBinanceSymbol()` (best-effort mapping from
+  however a user typed a symbol to a Binance USDT pair — "BTC", "BTCUSD" and "BTC/USD" all
+  resolve to "BTCUSDT"), `pickInterval()` (candle interval scales with trade duration — 1m for
+  a scalp up to 4h for a multi-day swing, so the chart stays readable regardless of hold time),
+  `fetchBinanceKlines()` (no auth needed, public market data; `cache: "force-cache"` since a
+  closed trade's historical candles never change once fetched).
+- **`src/app/api/trades/[id]/chart/route.ts`** — the data endpoint. Ownership enforced by
+  `getTrade()`'s own RLS scoping (same "can't leak which case it is" reasoning the trade detail
+  page already documents for not-found vs. not-yours). A GET, not embedded in the page's own
+  server render, so the Binance round trip only happens for trades that actually render the
+  chart, and lazily — it never blocks the trade detail page's initial load for the (currently
+  large) majority of non-crypto trades.
+- **`src/components/trades/trade-chart.tsx`** — fetches its own data client-side, renders
+  crypto-only, only for closed trades (`!trade.is_open && trade.asset_class === "crypto"` gates
+  whether the section appears on the trade detail page at all — a non-crypto trade shows no
+  chart section whatsoever, not a permanent "unavailable" message cluttering the page).
+
+### Fixed
+- **A real symbol-matching bug, caught live against real Binance data, not assumed correct
+  from code review.** `normalizeToBinanceSymbol("BTC")` returned `"BTC"` unchanged instead of
+  `"BTCUSDT"` — the "already a valid pair, leave it alone" check was `cleaned.endsWith("BTC")`,
+  which is trivially true when the *entire* symbol already equals `"BTC"` (a string always ends
+  with itself). Binance's API correctly rejected it with a real `400 {"code":-1121,"msg":"Invalid
+  symbol."}`, surfaced because a newly-added log line for the non-OK-response case (a real gap
+  in the original error handling — silently returning `null` on a non-200 with no log at all)
+  caught it. Fixed by requiring the symbol to be strictly longer than the quote-asset suffix it
+  matches, so a bare base-asset symbol always gets `USDT` appended. Verified against 9 cases
+  (bare symbols, already-quoted pairs, `USD`→`USDT` swaps, lowercase, a `/`-separated input, and
+  a real crypto-to-crypto pair like `ETHBTC` that must NOT be touched) before re-testing live.
+
+### Verified live
+`npx tsc --noEmit` clean on the first pass (the v5 API research paid off — no type errors from
+guessing at the library's shape), `npm run lint` clean, `npm run test:rls` and
+`npm run test:prop` unaffected at 101/101 and 134/134 (no schema touched). End-to-end against
+**real, live Binance market data** — not a mock: seeded a real closed BTC trade with a genuine
+past hour-long window, confirmed the endpoint returned real candles matching what `curl`ing the
+identical Binance URL directly returned, and confirmed the rendered chart shows the entry arrow,
+exit arrow, and SL/TP dashed lines at exactly their configured prices — including a first pass
+where the seeded trade's synthetic entry/exit prices didn't match where BTC actually traded
+during that real historical window (a test-fixture mistake, not a code bug — re-seeded with
+prices read back from the real candle data). Confirmed the non-crypto case renders no chart
+section at all, and the unmatched-symbol case shows the honest "Couldn't match this symbol to a
+price history" message rather than a broken or misleading chart. Checked at both desktop and
+375px mobile widths — the mobile render is fully legible, no layout issues.
+
 ## [0.34.0] — 2026-09-03
 
 ### Added — M9d: reports gap-fill
