@@ -541,6 +541,58 @@ expect_ok "...and switching it back on makes v2, not a collision" "$E" \
 expect_eq "the rulebook is now at version 2" "$E" \
   "select max(version)::text from public.prop_firm_profiles where user_id='$E';" "2"
 
+# ===========================================================================
+echo
+echo "==> Trigger-driven notifications (M7c) — a real bug lives here, twice"
+# ===========================================================================
+# Found live, both real: (1) the notify trigger originally sorted ALPHABETICALLY
+# BEFORE daily_summaries' own reaggregation trigger on the same table+event,
+# so it evaluated rule_status() against PRE-write aggregates — a breaching
+# trade recorded as status='ok'. Fixed by renaming triggers so
+# trades_rule_notify_on_* sorts after trades_reaggregate_on_*. (2) rule_status's
+# is_satisfied uses coalesce(comparison, true) for a target that doesn't
+# exist, which is correct for that field alone but meant every fresh account
+# fired bogus "target reached" notifications for not_applicable rows. Both
+# assertions below fail again if either regresses.
+H=$(mk_user "prop_h_${STAMP}@journal4me.test")
+[[ -n "$H" ]] || { echo "could not create user H"; exit 1; }
+as_user "$H" "insert into public.accounts (user_id,name,account_type,starting_balance,currency,reset_timezone) values ('$H','H prop','prop_firm',10000,'USD','UTC');" >/dev/null
+H_ACCT=$(as_owner "select id from public.accounts where user_id='$H' limit 1;" | tr -d ' \n\r')
+H_PROFILE=$(as_owner "insert into public.prop_firm_profiles (user_id,firm_name,profile_name) values ('$H','Test','Notif rules') returning id;" | tr -d ' \n\r')
+H_PHASE=$(as_owner "insert into public.phase_rules (user_id,profile_id,phase_order,phase_kind,label) values ('$H',$H_PROFILE,1,'funded','Funded') returning id;" | tr -d ' \n\r')
+as_owner "insert into public.drawdown_rules (user_id,profile_id,scope,limit_pct,pct_basis,pct_basis_source,dd_basis,measure_series) values ('$H',$H_PROFILE,'overall',5,'initial_balance','user_specified','static','closing_balance');" >/dev/null
+as_owner "insert into public.challenge_instances (user_id,account_id,profile_id,current_phase_id,starting_balance,started_on,current_phase_started_on) values ('$H',$H_ACCT,$H_PROFILE,$H_PHASE,10000,current_date,current_date);" >/dev/null
+
+expect_ok "H's account starts with zero notifications" "$H" \
+  "select 1/(case when count(*)=0 then 1 else 0 end) from public.notifications where account_id=$H_ACCT;"
+
+# 5% of 10,000 = 500 allowance; a 600 loss breaches it outright.
+as_user "$H" "insert into public.trades (user_id,account_id,symbol,direction,entry_price,size,entry_time,exit_time,pnl) values ('$H',$H_ACCT,'EURUSD','long',1.1,1,now() - interval '2 hours', now() - interval '1 hour', -600);" >/dev/null
+
+expect_eq "exactly ONE notification fired, not the bogus objective ones too" "$H" \
+  "select count(*)::text from public.notifications where account_id=$H_ACCT;" "1"
+expect_eq "...and it is the real breach, not a false 'target reached'" "$H" \
+  "select title from public.notifications where account_id=$H_ACCT;" "Overalldrawdownbreached"
+expect_ok "the breach notification reads a NEGATIVE headroom, not a stale positive one" "$H" \
+  "select 1/(case when (select body from public.notifications where account_id=$H_ACCT) like '%-%' then 1 else 0 end);"
+
+# The trigger-ordering regression's exact signature: state must reflect the
+# POST-write status, proving evaluate_and_notify ran after reaggregation, not
+# before it.
+STATE_STATUS=$(as_owner "select last_status from public.rule_notification_state where account_id=$H_ACCT and rule_key='overall_drawdown';" | tr -d ' \n\r')
+if [[ "$STATE_STATUS" == "breached" ]]; then
+  ok "rule_notification_state reflects the POST-write status (trigger fired after reaggregation)"
+else
+  bad "rule_notification_state shows '$STATE_STATUS', not 'breached' — the trigger-ordering bug is back"
+fi
+
+# A second trade that does NOT change the rule's status must not spam a
+# second notification — the dedupe_key (not just the transition check) is
+# what actually enforces this within one account's history.
+as_user "$H" "insert into public.trades (user_id,account_id,symbol,direction,entry_price,size,entry_time,exit_time,pnl) values ('$H',$H_ACCT,'EURUSD','long',1.1,1,now() - interval '1 hour', now(), -50);" >/dev/null
+expect_eq "staying breached does not create a second notification" "$H" \
+  "select count(*)::text from public.notifications where account_id=$H_ACCT;" "1"
+
 echo
 if [[ $fail -eq 0 ]]; then
   printf '\033[32m%d passed, 0 failed\033[0m\n' "$pass"

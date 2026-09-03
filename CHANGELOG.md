@@ -4,6 +4,65 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.0] — 2026-09-03
+
+### Added — M7c: the notification centre and the trigger-driven send pipeline
+- **`notifications`** does double duty as both the build plan's `notification_queue` (real-time
+  checks fire on trade write via a trigger, enqueueing here) and the in-app notification
+  centre — the same rows viewed at two different times, not two tables kept in sync. Read-only
+  to clients except a **column-specific grant** (`grant update (read_at) on notifications to
+  authenticated`): a client may mark a row read and touch nothing else, enforced by Postgres
+  itself, not UI discipline.
+- **`prop.evaluate_and_notify()`** re-runs `rule_status()` for one account and compares each
+  row against `rule_notification_state` (internal, zero client grants) to notify only on a
+  genuine transition — a limit rule newly crossing into warning/critical/breached, a gate
+  newly blocking *or clearing* a payout (both directions — "you can request a payout again"
+  is exactly the kind of good news this system exists to deliver), an objective newly
+  satisfied. Never on staying flat, which is what makes this usable instead of noisy.
+- **Delivery is a real async webhook, verified before being relied on**: `pg_net.http_post()`
+  from the trigger calls a Next.js Route Handler (`/api/push/process-queue`) that drains
+  pending rows and sends real pushes via the same `send.ts` M7b already built. Confirmed live
+  that a `net.http_get` from inside the Postgres container reaches the app on the host via
+  `host.docker.internal` before any of this was built around that assumption.
+- **`ALTER DATABASE ... SET app.*` was tried for the endpoint/secret config and failed live**
+  (`permission denied to set parameter`, 42501) — this migration role has `CREATE EXTENSION`
+  but not database-level parameter privileges, which mirrors the real hosted project's
+  permission model closely enough that routing around it locally would only move the same
+  failure to production. Replaced with a plain internal table (`prop.app_config`):
+  reconfiguring for a real deployment is one `UPDATE`, not a superuser-only `ALTER DATABASE`.
+- Time-based checks: `public.run_daily_notification_checks()` (inactivity only — an active
+  challenge with no trades in 7+ days, deduped to once per calendar week — withdrawal-countdown
+  and min-trading-days nudges are a documented follow-on, not built here), on a `pg_cron`
+  schedule confirmed idempotent by name before being relied on for that (re-running
+  `cron.schedule()` with the same job name updates the job rather than duplicating or erroring).
+
+### Fixed — two real bugs, found only because a trade was actually inserted and inspected
+1. **Trigger firing order.** Postgres fires same-event triggers in alphabetical-by-name order.
+   The notify trigger was originally named `notify_on_trades_insert`, which sorts *before* M5's
+   `trades_reaggregate_on_insert` on the same table and event — so it evaluated `rule_status()`
+   against **pre-write** `daily_summaries`. A trade that breached the account outright was
+   recorded in `rule_notification_state` as `status='ok'`. Fixed by renaming the triggers
+   (`trades_rule_notify_on_*`, sorting after `trades_reaggregate_on_*`), with the reasoning and
+   the exact failure documented at the trigger definitions so a future rename doesn't
+   reintroduce it silently.
+2. **`not_applicable` treated as a completed objective.** `rule_status()`'s `is_satisfied` uses
+   `coalesce(comparison, true)` for a target that doesn't exist — correct for that field in
+   isolation (a funded phase legitimately has nothing to fail), but `evaluate_and_notify` was
+   missing the same `status <> 'not_applicable'` guard the UI already applies before display,
+   so every fresh account fired two bogus "target reached" notifications on its very first
+   evaluation. Fixed by adding the same guard, and it's now permanently regression-tested.
+
+### Verified live, end to end, no browser permission grant required
+A trade breaching a 5%-of-starting-balance drawdown rule was inserted directly against a real
+account with a real (VAPID-valid, pointed at a real FCM endpoint) subscription. Traced the
+entire chain in the database and the running app: exactly one correct notification created (not
+the two bogus ones), `rule_notification_state` reflecting the post-write status, a real `POST
+/api/push/process-queue` hitting the dev server, a real signed send attempt to FCM, the fake
+subscription correctly pruned after FCM's 410, and the in-app centre rendering the notification
+and correctly clearing it through "Mark all read" — confirmed in the database after the click,
+not just on screen. `npm run test:prop` gained 6 permanent assertions covering both bugs
+(134/134); `npm run test:rls` gained 7 for `notifications`' RLS/column-grant posture (94/94).
+
 ## [0.26.0] — 2026-09-03
 
 ### Added — M7b: push subscriptions and "Enable alerts"

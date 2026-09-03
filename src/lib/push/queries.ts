@@ -8,6 +8,32 @@ export type PushSubscriptionRow = {
   last_seen_at: string;
 };
 
+export type NotificationRow = {
+  id: number;
+  account_id: number | null;
+  kind: string;
+  title: string;
+  body: string;
+  url: string | null;
+  read_at: string | null;
+  created_at: string;
+};
+
+export async function listNotifications(): Promise<NotificationRow[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("notifications")
+    .select("id, account_id, kind, title, body, url, read_at, created_at")
+    .order("created_at", { ascending: false })
+    .limit(50);
+
+  if (error) {
+    console.error("[push] listNotifications failed", error);
+    return [];
+  }
+  return data ?? [];
+}
+
 export async function listPushSubscriptions(): Promise<PushSubscriptionRow[]> {
   const supabase = await createClient();
   const { data, error } = await supabase

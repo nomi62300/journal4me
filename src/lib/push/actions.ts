@@ -65,6 +65,43 @@ export async function unsubscribeFromPush(endpoint: string): Promise<PushActionS
   return { ok: true };
 }
 
+/**
+ * Only touches read_at — the column grant on notifications is restricted to
+ * exactly that (see the migration), so attempting to change anything else
+ * through this same client would fail with 42501 regardless of what this
+ * function does.
+ */
+export async function markNotificationRead(id: number): Promise<PushActionState> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("notifications")
+    .update({ read_at: new Date().toISOString() })
+    .eq("id", id)
+    .is("read_at", null);
+
+  if (error) {
+    console.error("[push] markNotificationRead failed", error);
+    return { error: "Couldn't mark that as read." };
+  }
+  revalidatePath("/notifications");
+  return { ok: true };
+}
+
+export async function markAllNotificationsRead(): Promise<PushActionState> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("notifications")
+    .update({ read_at: new Date().toISOString() })
+    .is("read_at", null);
+
+  if (error) {
+    console.error("[push] markAllNotificationsRead failed", error);
+    return { error: "Couldn't mark everything as read." };
+  }
+  revalidatePath("/notifications");
+  return { ok: true };
+}
+
 export type SendTestResult = PushActionState & { sent?: number; failed?: number };
 
 /**

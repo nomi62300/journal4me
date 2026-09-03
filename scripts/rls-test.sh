@@ -268,6 +268,19 @@ expect_deny "G cannot hand its OWN row to a third user via a raw UPDATE" "$G" "u
 expect_eq   "...the row is still G's after the attempt"   "$G" "select user_id::text from public.push_subscriptions where endpoint='https://push.example/f1';" "$G"
 
 echo
+echo "==> notifications (M7c)"
+H=$(mk_user "rls_h_$(date +%s)@journal4me.test")
+as_owner "insert into public.notifications (user_id, kind, title, body, dedupe_key) values ('$H','test','Test title','Test body','manual-test-1');" >/dev/null
+NOTE_ID=$(as_owner "select id from public.notifications where dedupe_key='manual-test-1';" | tr -d ' \n\r')
+expect_deny "H cannot INSERT a notification directly" "$H" "insert into public.notifications (user_id, kind, title, body, dedupe_key) values ('$H','test','sneaky','sneaky','manual-test-2');"
+expect_eq   "H can read the system-written notification" "$H" "select count(*) from public.notifications where user_id='$H';" "1"
+expect_ok   "H can mark it read (the one column grant allows it)" "$H" "update public.notifications set read_at = now() where id=$NOTE_ID;"
+expect_deny "H cannot edit the TITLE via the same route (no column grant)" "$H" "update public.notifications set title='edited' where id=$NOTE_ID;"
+expect_deny "H cannot DELETE a notification (no delete grant)" "$H" "delete from public.notifications where id=$NOTE_ID;"
+expect_eq   "B sees NONE of H's notifications" "$B" "select count(*) from public.notifications;" "0"
+expect_deny "rule_notification_state is invisible even to its owner (zero grants)" "$H" "select count(*) from public.rule_notification_state;"
+
+echo
 echo "==> Reference data"
 expect_eq   "plans readable by a signed-in user"   "$A" "select count(*) from public.plans;" "2"
 expect_eq   "subscriptions table readable, empty"  "$A" "select count(*) from public.subscriptions;" "0"
