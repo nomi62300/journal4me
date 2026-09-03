@@ -4,6 +4,42 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] — 2026-09-03
+
+### Added — M7a: the PWA foundation (a real gap found, not in the plan)
+The build plan's M0 said this would already exist ("PWA manifest + service worker registered
+… installable"), but no manifest, service worker, or icon existed anywhere in the repo —
+checked `src/app/layout.tsx`, `next.config.ts`, and `public/` directly. Web push (the point of
+M7) is impossible without it, so it's built now, first.
+
+- **`@serwist/turbopack`, not `@serwist/next`.** The plan named Serwist generically, but
+  `@serwist/next`'s webpack plugin cannot run under Turbopack, which is this Next.js version's
+  default and only bundler. Verified before installing anything: `@serwist/turbopack` exists
+  specifically for this combination — it serves the built service worker through a Route
+  Handler (`app/sw/[path]/route.ts`, a *single* dynamic segment, not a catch-all — confirmed
+  against Serwist's own docs after a catch-all produced a real `params.path: string[]` vs
+  `string` type mismatch) instead of hooking into the bundler at all.
+- `app/manifest.ts`, a generated set of app icons (192/512/maskable/apple-touch, rasterized
+  from an SVG mark since no design asset existed), and `app/sw.ts` registering `push` and
+  `notificationclick` handlers now — ahead of M7b/M7c actually sending anything — so the
+  worker only needs new payload shapes later, not new event wiring.
+- `useNativeEsbuild: true` (added `esbuild` as a direct dependency): this package defaults to
+  `esbuild-wasm` on non-Windows, which was never installed and isn't needed for anything else
+  this app does.
+- **Checked, not assumed:** the classic `apple-mobile-web-app-capable` meta tag is deprecated;
+  Safari now honours the Web App Manifest's `display: "standalone"` directly, and this Next.js
+  version already renders the current `mobile-web-app-capable` tag on its own — confirmed live
+  in the rendered `<head>` rather than hand-added on top of what's already correct.
+
+### Verified
+Service worker registers and activates in dev (`getRegistrations()` → `activated`, `/sw/sw.js`
+→ 200) and, more importantly, in a full **production build**, which is the only mode that
+actually exercises precache-manifest injection (dev disables it entirely) — `next build`
+completed clean with 43 precache entries and `/sw/sw.js` / `/sw/sw.js.map` correctly
+pre-rendered as static routes. Manifest, all four icon sizes, and the `appleWebApp` metadata
+confirmed reachable and correctly shaped via direct fetches against the running app, not
+inferred from source review.
+
 ## [0.24.0] — 2026-09-03
 
 ### Added — M6c: the rule engine, on screen

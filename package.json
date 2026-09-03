@@ -1,6 +1,6 @@
 {
   "name": "journal4me",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -16,11 +16,13 @@
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",
+    "@serwist/turbopack": "^9.5.12",
     "@supabase/ssr": "^0.12.5",
     "@supabase/supabase-js": "^2.112.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "esbuild": "^0.28.2",
     "lucide-react": "^1.39.0",
     "next": "16.3.4",
     "next-themes": "^0.4.6",
@@ -30,6 +32,7 @@
     "react-dom": "19.2.8",
     "react-hook-form": "^7.87.0",
     "recharts": "^3.8.0",
+    "serwist": "^9.5.12",
     "shadcn": "^4.19.1",
     "sonner": "^2.0.8",
     "tailwind-merge": "^3.6.0",
