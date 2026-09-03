@@ -4,6 +4,46 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.0] — 2026-09-03
+
+### Added — M8a: the journal
+- **`/journal`** — a calendar-to-day-view notebook (pre-market plan, post-session review, mood,
+  lessons), the navigation pattern the build plan names from the incumbent journals. Pure
+  application layer on top of schema M2 already built and granted
+  (`journal_entries`) — no migration needed.
+- One user, one calendar date, never account- or reset-timezone-scoped: journaling is a daily
+  habit independent of any one account's trading-day boundary, unlike everything in the prop
+  rule engine. `saveJournalEntry()` always upserts on the table's own `UNIQUE (user_id,
+  entry_date)` constraint, so writing today's entry twice (create, then edit) is the same call,
+  not a branch.
+- The day view cross-references trades closed on that plain calendar date across every
+  account — a cheap, genuinely useful "what did I actually trade" reference, not a rule-engine
+  surface.
+- The entry form is four plain-text fields, which puts it squarely inside AGENTS.md's "more
+  than one or two plain text fields" rule: `onSubmit` + `startTransition`, never `<form
+  action={fn}>`, matching `trade-form.tsx`'s established pattern.
+- `JournalCalendar` fetches the user's **entire** journal history in one query rather than
+  per-month (same reasoning as the dashboard's `CalendarHeatmap`, which does the same for
+  trades) — at most one row per day, so even years of daily journaling is a few hundred small
+  rows, and client-side month navigation never shows a month as falsely empty just because it
+  hasn't been separately fetched.
+
+### Verified live, full CRUD
+Create → persists across reload (all four fields round-tripped correctly) → the calendar marks
+the right day and *only* that day → delete removes the row, confirmed in the database → the
+calendar reflects the removal. Checked at mobile width too.
+
+**A real bug was found during this verification, but it was in the test script, not the
+product**: `document.querySelector('form')` matched the sidebar's own `<form
+action={signOut}>` — which appears earlier in the DOM than the journal entry form — so every
+scripted "save" was actually signing the user out. Caught by checking the dev server's own
+action-invocation log (`└─ ƒ signOut()`) rather than trusting the UI's apparent redirect,
+confirmed root cause by enumerating every `<form>` on the page, and fixed by targeting the
+field's own `closest('form')` instead of the page's first form. Two false leads were ruled out
+empirically before finding the real cause (a multi-tab cookie-jar race, and Turbopack dev-server
+action-ID staleness after a full `.next` + process restart) — noted so the same detour isn't
+repeated if a similar symptom shows up again.
+
 ## [0.27.0] — 2026-09-03
 
 ### Added — M7c: the notification centre and the trigger-driven send pipeline
