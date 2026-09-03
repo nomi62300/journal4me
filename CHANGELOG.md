@@ -4,6 +4,48 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0] — 2026-09-03
+
+### Added — M6c: the rule engine, on screen
+- **`public.enable_rule_tracking()`** turns an account's existing setup into a versioned
+  rulebook and starts a challenge, atomically. It builds the phase topology from
+  `challenge_type` (including the 0-evaluation-phase instant case), the drawdown rules from
+  the daily/max limits, and a payout gate from the consistency percentage — so nobody re-types
+  what the onboarding wizard already collected. One database function rather than five
+  client-side inserts, because a rulebook is not valid in pieces: a half-written profile that
+  lost its overall drawdown row to a failed second request would silently under-report risk.
+- It takes the two questions the wizard never asked — **is the overall drawdown static or
+  trailing**, and **what is a percentage a percentage of** — as *required* arguments. Neither
+  can be safely assumed: assuming static for a firm that trails shows more headroom than
+  exists, which is the dangerous direction, and "5% of initial" vs "of current" diverge once
+  in profit. The dialog asks both with a worked example ("a 5% daily limit is $5,000.00 on
+  this account — check that against your firm's dashboard").
+- **The rule status card** on the account page: the `max_loss_today` hero, a meter per rule,
+  the consistency cure amount, and a confidence banner that names the *actual* source of doubt
+  and offers the equity-mark dialog when the gap is one the user can close in thirty seconds.
+  It formats and colours only — every number comes from `rule_status()`.
+- Switching tracking on **replaces** the older informational indicators rather than sitting
+  beside them. They compute a static floor from the starting balance while the engine may be
+  trailing a high-water mark, and two visibly different answers to "how much room do I have"
+  on one screen is worse than either alone. The stale "drawdown tracking arrives in a future
+  update" copy is gone with them.
+
+### Verified live, end to end
+Seeded an Apex-style instant-funded 100k account (four days, balance 102,500, high-water mark
+105,500) and drove the whole flow in the browser:
+- Setup asked both questions, and the Radix `<Select>` values were confirmed on the hidden
+  native `<select>` rather than the trigger text, per the house rule.
+- With no equity marks: hero **$5,000**, overall floor 95,500, banner warning the figures may
+  flatter the account.
+- After recording one real intraday peak of 112,000, the floor moved to **$100,100** — the Apex
+  lock clamping what would otherwise have been 102,000 — and the hero **fell to $2,400**.
+  Telling the truth made the number smaller, which is the entire argument for the confidence
+  machinery.
+- After marking every day and reconciling, all five rules report `exact` with no bias and the
+  banner disappears.
+- The consistency gate showed "120% of a 25% cap" with "earn $9,500.00 more and this clears —
+  it blocks a payout, it does not fail the account".
+
 ## [0.23.0] — 2026-09-03
 
 ### Added — M6b (part 2): `rule_status()`, the single rule contract

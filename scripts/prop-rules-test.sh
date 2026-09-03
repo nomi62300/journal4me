@@ -57,7 +57,7 @@ expect_deny() {
   out=$(as_user "$u" "$s" 2>&1)
   if [[ $? -eq 0 ]]; then
     bad "$d (expected denial, but it SUCCEEDED)"
-  elif grep -qiE 'row-level security|permission denied|violates row-level|violates check constraint|duplicate key value|violates foreign key constraint|rules are frozen|not found, or not yours|null value in column|violates not-null' <<<"$out"; then
+  elif grep -qiE 'row-level security|permission denied|violates row-level|violates check constraint|duplicate key value|violates foreign key constraint|rules are frozen|not found, or not yours|null value in column|violates not-null|Unknown percentage basis|already has rule tracking|must be static or trailing|prop firm accounts only' <<<"$out"; then
     ok "$d"
   else
     bad "$d (blocked, but by the WRONG error: $(grep -m1 ERROR <<<"$out"))"
@@ -496,6 +496,50 @@ expect_eq "...the bias disappears with the guesswork" "$D" \
   "select coalesce(estimate_bias,'(null)') from public.rule_status() where rule_key='overall_drawdown';" "(null)"
 expect_eq "...and the true floor is stricter: the lock binds at 50,100" "$D" \
   "$(rs floor_value overall_drawdown)" "50100.00"
+
+# ===========================================================================
+echo
+echo "==> enable_rule_tracking() — building a rulebook from an account's setup"
+# ===========================================================================
+E=$(mk_user "prop_e_${STAMP}@journal4me.test")
+[[ -n "$E" ]] || { echo "could not create user E"; exit 1; }
+as_user "$E" "insert into public.accounts (user_id,name,account_type,prop_firm_name,challenge_type,starting_balance,currency,reset_timezone,daily_loss_limit_type,daily_loss_limit_value,max_loss_limit_type,max_loss_limit_value,consistency_rule_pct,phase_1_profit_target_type,phase_1_profit_target_value,phase_2_profit_target_type,phase_2_profit_target_value) values ('$E','E prop','prop_firm','FTMO','phase_2',100000,'USD','UTC','percent',5,'percent',10,25,'percent',8,'percent',5);" >/dev/null
+E_ACCT=$(as_owner "select id from public.accounts where user_id='$E' limit 1;" | tr -d ' \n\r')
+as_user "$E" "insert into public.trades (user_id,account_id,symbol,direction,entry_price,size,entry_time,exit_time,pnl) values ('$E',$E_ACCT,'EURUSD','long',1.1,1,'2026-08-10T08:00:00Z','2026-08-10T13:00:00Z',2000);" >/dev/null
+
+expect_deny "the two unassumable questions are REQUIRED (bad basis rejected)" "$E" \
+  "select public.enable_rule_tracking($E_ACCT,'static','closing_balance','whatever');"
+expect_ok "rule tracking switches on" "$E" \
+  "select public.enable_rule_tracking($E_ACCT,'trailing','closing_balance','initial_balance');"
+expect_eq "a 2-phase challenge became 2 evaluation + 1 funded" "$E" \
+  "select count(*) filter (where phase_kind='evaluation')||'+'||count(*) filter (where phase_kind='funded') from public.phase_rules where user_id='$E';" "2+1"
+expect_eq "both drawdown rules were created" "$E" \
+  "select count(*)::text from public.drawdown_rules where user_id='$E';" "2"
+expect_eq "the overall rule kept the TRAILING answer the user gave" "$E" \
+  "select dd_basis from public.drawdown_rules where user_id='$E' and scope='overall';" "trailing"
+expect_eq "...and recorded the basis as user-specified, not assumed" "$E" \
+  "select pct_basis_source from public.drawdown_rules where user_id='$E' and scope='overall';" "user_specified"
+expect_eq "the consistency percentage became a payout GATE" "$E" \
+  "select evaluated_at from public.consistency_rules where user_id='$E';" "withdrawal_request"
+# Tracking must judge the history that already exists, not start from today.
+expect_eq "the window starts at the earliest trading day, not today" "$E" \
+  "select started_on::text from public.challenge_instances where user_id='$E';" "2026-08-10"
+expect_deny "switching it on twice is refused" "$E" \
+  "select public.enable_rule_tracking($E_ACCT,'static','closing_balance','initial_balance');"
+
+# 10% of 100,000 = 10,000 -> floor 92,000 off a 102,000 high-water mark.
+expect_eq "rule_status reports the trailing floor at 92,000" "$E" \
+  "select round(floor_value,2)::text from public.rule_status() where rule_key='overall_drawdown';" "92000.00"
+expect_eq "phase 1's 8% target resolves to 8,000" "$E" \
+  "select round(limit_value,2)::text from public.rule_status() where rule_key='profit_target';" "8000.00"
+
+expect_ok "tracking can be switched off" "$E" "select public.disable_rule_tracking($E_ACCT);"
+expect_eq "...which leaves the trades untouched" "$E" \
+  "select count(*)::text from public.trades where user_id='$E';" "1"
+expect_ok "...and switching it back on makes v2, not a collision" "$E" \
+  "select public.enable_rule_tracking($E_ACCT,'static','closing_balance','initial_balance');"
+expect_eq "the rulebook is now at version 2" "$E" \
+  "select max(version)::text from public.prop_firm_profiles where user_id='$E';" "2"
 
 echo
 if [[ $fail -eq 0 ]]; then

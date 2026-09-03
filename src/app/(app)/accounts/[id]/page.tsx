@@ -7,6 +7,7 @@ import { AccountEditForm } from "@/components/accounts/account-edit-form";
 import { ArchiveAccountControl } from "@/components/accounts/archive-account-control";
 import { DeleteAccountDialog } from "@/components/accounts/delete-account-dialog";
 import { LossLimitIndicator } from "@/components/accounts/loss-limit-indicator";
+import { RuleStatusCard } from "@/components/prop/rule-status-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,6 +18,7 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { getAccount, getAccountTodayPnl } from "@/lib/accounts/queries";
+import { getChallengeContext } from "@/lib/prop/queries";
 import {
   CHALLENGE_TYPES,
   ASSET_CLASSES,
@@ -66,6 +68,15 @@ export default async function AccountDetailPage({
 
   const hasLimits = account.daily_loss_limit_value !== null || account.max_loss_limit_value !== null;
   const todayPnl = hasLimits ? await getAccountTodayPnl(account.id) : null;
+
+  // When the rule engine is switched on it REPLACES the informational
+  // indicators below rather than sitting beside them. Those compute a static
+  // floor from the starting balance; the engine may be trailing a high-water
+  // mark. Two visibly different answers to "how much room do I have" on one
+  // screen is worse than either answer alone.
+  const isProp = account.account_type === "prop_firm";
+  const challengeContext = isProp ? await getChallengeContext(account.id) : null;
+  const trackingOn = challengeContext !== null;
 
   const dailyLimit = limitAmount(
     account.daily_loss_limit_type,
@@ -183,7 +194,7 @@ export default async function AccountDetailPage({
             </dd>
           </dl>
 
-          {hasLimits ? (
+          {hasLimits && !trackingOn ? (
             <div className="space-y-3 border-t pt-3">
               {dailyLimit !== null ? (
                 <LossLimitIndicator
@@ -217,7 +228,7 @@ export default async function AccountDetailPage({
             </div>
           ) : null}
 
-          {phaseTargets.length > 0 ? (
+          {phaseTargets.length > 0 && !trackingOn ? (
             <div className="space-y-3 border-t pt-3">
               {phaseTargets.map(({ phase, target }) => (
                 <LossLimitIndicator
@@ -236,7 +247,7 @@ export default async function AccountDetailPage({
             </div>
           ) : null}
 
-          {account.consistency_rule_pct !== null ? (
+          {account.consistency_rule_pct !== null && !trackingOn ? (
             <p className="text-sm">
               <span className="text-muted-foreground">Consistency rule — </span>
               no single day may be more than{" "}
@@ -247,11 +258,10 @@ export default async function AccountDetailPage({
             </p>
           ) : null}
 
-          {account.account_type === "prop_firm" ? (
+          {isProp && !trackingOn ? (
             <p className="text-muted-foreground border-t pt-3 text-xs">
-              Phase progress, drawdown tracking and payout rules for this firm
-              arrive with a future update — this account is ready to log
-              trades against in the meantime.
+              Live drawdown tracking — trailing high-water marks, headroom and
+              payout gates — is available for this account. Switch it on below.
             </p>
           ) : null}
 
@@ -282,6 +292,25 @@ export default async function AccountDetailPage({
           </div>
         </CardContent>
       </Card>
+
+      {isProp && !account.is_archived ? (
+        <RuleStatusCard
+          context={challengeContext}
+          accountId={account.id}
+          currency={account.currency}
+          startingBalance={account.starting_balance}
+          currentBalance={account.balance}
+          dailyLimitPct={
+            account.daily_loss_limit_type === "percent"
+              ? account.daily_loss_limit_value
+              : null
+          }
+          maxLimitPct={
+            account.max_loss_limit_type === "percent" ? account.max_loss_limit_value : null
+          }
+          hasAnyLimit={hasLimits}
+        />
+      ) : null}
 
       <Card>
         <CardHeader>
