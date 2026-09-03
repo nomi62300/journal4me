@@ -4,6 +4,43 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] — 2026-09-03
+
+### Added — M5 (part 1): `daily_summaries` and its re-aggregation triggers
+- `daily_summaries` — one row per account per trading day (P&L, ledger movements, win/loss
+  counts, gross profit/loss, largest win/loss, R-sum). The only materialised derivation in this
+  schema; every other prop-firm number (balance, HWM, drawdown floor) stays computed on read from
+  an ordered day series, per the standing "never store a path-dependent value" rule. Read-only to
+  clients — `authenticated` holds a `SELECT`-only grant, verified live via
+  `has_table_privilege(...)`; every row is written exclusively by
+  `reaggregate_daily_summary()`, a `SECURITY DEFINER` function invoked only from triggers.
+- Full re-aggregation on every write to `trades` or `account_ledger`, never delta arithmetic —
+  delta updates drift under concurrency and can't self-heal, full re-aggregation always converges
+  to truth from the source rows. A day left with zero trades and zero ledger activity after
+  re-aggregation has its row deleted, not zeroed, matching the build plan's own "empty days are
+  deleted" design.
+- Trade P&L is bucketed by each account's own `pnl_attribution` (`open_time` vs `close_time`, an
+  existing-but-previously-UI-unexposed column) rather than hard-coding `close_day` — verified
+  live with an `open_time` account: a trade opened 06-20 and closed 06-21 correctly summarises
+  under 06-20.
+- **Six trigger functions, not one**: `trades`/`account_ledger` × insert/update/delete, each
+  referencing only the transition table(s) its own event actually provides. Confirmed empirically
+  against this Postgres (17.6) before writing any of them — a single trigger combining multiple
+  events (`INSERT OR UPDATE OR DELETE`) with `REFERENCING OLD TABLE ... NEW TABLE ...` is rejected
+  outright (`ERROR: transition tables cannot be specified for triggers with more than one event`),
+  the same class of restriction `AGENTS.md` already documents for transition tables + column
+  lists, just triggered by combining events instead. Each function collects every affected
+  `(account_id, trading_day)` pair from **both** `open_day` and `close_day` on the update path —
+  an edit moving `exit_time` across a reset boundary dirties two days, and re-aggregating only the
+  new one leaves the old one permanently inflated — then loops over the shared
+  `reaggregate_daily_summary()` helper.
+- Live-verified end to end against the local database: single-day insert aggregation; a
+  cross-boundary `exit_time` update correctly splitting one day's totals into two; delete-to-zero
+  correctly removing the now-empty day's row; an `account_ledger` insert on a trade-free day
+  creating a row and its delete removing it again; a single bulk `INSERT` spanning three trades
+  across two days correctly producing two summary rows in one statement-level pass; and `ON DELETE
+  CASCADE` from `accounts` correctly clearing `daily_summaries` when a test account was deleted.
+
 ## [0.18.0] — 2026-09-03
 
 ### Added — M4: CSV import
