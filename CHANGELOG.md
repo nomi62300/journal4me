@@ -4,6 +4,54 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] — 2026-09-03
+
+### Added — M6a: the prop firm rule schema
+Nine new tables across two migrations — the rulebook (`prop_firm_profiles`, `phase_rules`,
+`drawdown_rules`, `consistency_rules`, `challenge_instances`) and the evidence
+(`equity_marks`, `balance_reconciliations`, `withdrawals`, `breach_events`) — all with
+RLS, grants, parent-ownership checks on write, and no `truncate` anywhere.
+
+- **The three drawdown variants are DATA, not code.** `dd_basis` (static/trailing) +
+  `measure_series` (closing balance / closing equity / intraday equity high) +
+  `trail_lock_cap_offset` together express FTMO's static drawdown, Topstep's trailing-on-
+  closing-balance, and Apex's trailing-on-intraday-high-locking-$100-above-start as three
+  rows that differ only in column values. Apex's famous "lock" is emergent from the
+  `LEAST()` — there is deliberately no `locked_at` column and no state machine.
+- **The funded stage is a phase row, not a separate concept.** That is what makes all four
+  topologies expressible without branching: 3-phase is 3 evaluation rows + 1 funded, and
+  instant-funded is **0 evaluation rows + 1 funded**. The instant case only works because
+  `profit_target_*` is nullable — a `NOT NULL` target is precisely what would make instant
+  accounts unrepresentable, so it must never become one.
+- **Profiles are versioned and freeze on first use.** A rulebook becomes immutable the moment
+  a `challenge_instance` references it, so a March edit cannot silently rewrite the rules
+  January was judged under (Topstep changing its payout path in Feb 2026 is exactly this).
+  `public.clone_profile_version()` makes producing v2 a single call — including remapping
+  phase-scoped rules onto the new version's own phases, which a naive copy would leave
+  pointing at v1 and quietly judge v2 partly under v1's rules.
+- **A percentage limit cannot be saved without saying what it is a percentage OF**, and
+  `pct_basis_source` records whether the user chose that basis or it was assumed — "5% daily
+  loss" of initial vs current balance is a silent 10-20% error once an account is in profit,
+  so the UI must be able to say "we assumed this, confirm it" rather than render a crisp
+  number nobody picked.
+- `breach_events` is read-only to clients (SELECT-only grant, no write policy), like
+  `daily_summaries`: it is written only by M6b's reconciler, and unsupported events will be
+  *retracted with a reason* rather than deleted — if the app told someone they blew their
+  account two weeks ago, quietly erasing that is worse than explaining it.
+- `equity_marks` and `balance_reconciliations` ship **now, not later**, because without them
+  an Apex-style account shows confidently wrong numbers: closing balances are a *lower* bound
+  on true peak equity, so a floor computed from them sits too low and the app reports more
+  headroom than really exists.
+
+### Added — `npm run test:prop`, the acceptance test the model had to survive
+`scripts/prop-rules-test.sh`, 74 assertions, all passing. It encodes the build plan's own
+pass/fail bar: the three firms and all four topologies must be expressible with **no schema
+change and no branching code**, or the model is wrong. It also covers the freeze-on-first-use
+guards, the composite foreign key that stops a rule being pinned to another profile's phase,
+the `UNIQUE NULLS NOT DISTINCT` that stops two competing "all phases" rules, and cross-tenant
+isolation on all nine tables — including the dangerous shape where user B owns the row but
+points it at user A's profile. `npm run test:rls` still passes 72/72 alongside it.
+
 ## [0.20.0] — 2026-09-03
 
 ### Added — M5 (part 2): the metric layer and `/analytics`
