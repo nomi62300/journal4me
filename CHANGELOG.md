@@ -4,6 +4,38 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.0] — 2026-09-03
+
+### Added — M6b (part 1): the day series and the drawdown floor
+- `v_challenge_day_series` — running balance, day-start balance and both high-water marks
+  (closing-balance and intraday-equity) per challenge day, recomputed from `daily_summaries`
+  on every read. Nothing is stored: a stored HWM only ratchets *up* and so cannot be
+  un-ratcheted when a backdated trade is edited or deleted, which would leave a floor
+  permanently too high and tell a user they failed when they did not.
+- `v_challenge_day_floors` — the `LEAST(anchor − limit, starting_balance + lock_offset)` that
+  makes static, trailing, and trailing-with-lock **one expression instead of three code
+  paths**. Apex's lock is emergent from the `LEAST`; there is no `locked_at` column anywhere.
+- The HWM series honours `account_ledger.affects_hwm`, which `daily_summaries` deliberately
+  does not carry — a payout lowers the balance but must not lower the basis a trailing
+  threshold measures from. That is why taking a payout genuinely shrinks headroom on a
+  trailing account, and the series reproduces that rather than hiding it.
+- Both views are `security_invoker = true`, and the test now **asserts that mechanically**
+  (plus that no materialized view exists in `public` at all) — a view over an RLS table
+  defaults to definer rights and would hand every caller every tenant's history.
+
+### Verified — floor math against hand-computed fixtures
+`npm run test:prop` is now 92 assertions. The new section runs one identical four-day series
+(50,000 → 51,000 → 52,500 → 51,700 → 50,500) past all three firms by swapping *only* the
+profile the challenge points at, and every expected figure is hand-computed in the script:
+- FTMO static: overall floor pinned at 45,000 throughout; daily floor 49,200 off the 51,700
+  day-start; headroom 1,300.
+- Topstep trailing: floor ratchets to 50,500 and headroom is **exactly 0 while the account is
+  still 500 up on its starting balance** — the trap the product exists to surface.
+- Apex: 50,000 with no equity marks, and a recorded 53,500 intraday peak makes the floor
+  *stricter* — the raw trailing floor of 51,000 gets clamped by the lock to **50,100**.
+- Deleting the peak day's trade **un-ratchets the HWM** to 51,000 and drags Apex's floor down
+  to 48,500, confirming the whole chain is derived rather than stored.
+
 ## [0.21.0] — 2026-09-03
 
 ### Added — M6a: the prop firm rule schema

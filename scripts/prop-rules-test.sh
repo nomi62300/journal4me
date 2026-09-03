@@ -300,6 +300,114 @@ expect_ok "A can READ the breach log" "$A" "select count(*) from public.breach_e
 expect_deny "A cannot WRITE the breach log by hand" "$A" \
   "insert into public.breach_events (user_id,account_id,challenge_instance_id,rule_key,occurred_on,severity,snapshot) values ('$A',$A_ACCT,$CI,'daily_loss',current_date,'breach','{}'::jsonb);"
 
+# ===========================================================================
+echo
+echo "==> Every rule-engine view enforces security_invoker"
+# ===========================================================================
+# Asserted mechanically rather than trusted to code review: a view over an
+# RLS-protected table defaults to DEFINER rights and would hand every caller
+# every tenant's trading history. This is a silent, total leak if it regresses.
+expect_eq "no v_challenge* view is missing security_invoker" "$A" \
+  "select count(*)::text from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='v' and c.relname like 'v_challenge%' and not coalesce('security_invoker=true' = any(c.reloptions), false);" "0"
+expect_eq "no MATERIALIZED view exists in public (they cannot enforce RLS)" "$A" \
+  "select count(*)::text from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='m';" "0"
+
+# ===========================================================================
+echo
+echo "==> Drawdown floor math — three firms over ONE identical day series"
+# ===========================================================================
+# The same four trading days are judged by FTMO's static floor, Topstep's
+# trailing floor and Apex's trailing-with-lock floor, swapping ONLY the profile
+# the challenge points at. Every expected number is hand-computed below,
+# because a wrong drawdown figure still looks exactly like a figure.
+#
+#   start   50,000
+#   Jul 1   +1,000 -> 51,000
+#   Jul 2   +1,500 -> 52,500   <- high-water mark
+#   Jul 3     -800 -> 51,700
+#   Jul 6   -1,200 -> 50,500
+C=$(mk_user "prop_c_${STAMP}@journal4me.test")
+[[ -n "$C" ]] || { echo "could not create user C"; exit 1; }
+as_user "$C" "insert into public.accounts (user_id,name,account_type,starting_balance,currency,reset_timezone) values ('$C','C prop','prop_firm',50000,'USD','UTC');" >/dev/null
+C_ACCT=$(as_owner "select id from public.accounts where user_id='$C' limit 1;" | tr -d ' \n\r')
+for spec in "2026-07-01:1000" "2026-07-02:1500" "2026-07-03:-800" "2026-07-06:-1200"; do
+  d=${spec%%:*}; p=${spec#*:}
+  as_user "$C" "insert into public.trades (user_id,account_id,symbol,direction,entry_price,size,entry_time,exit_time,pnl) values ('$C',$C_ACCT,'EURUSD','long',1.1,1,'${d}T08:00:00Z','${d}T15:00:00Z',$p);" >/dev/null
+done
+
+cprofile() {
+  as_user "$C" "insert into public.prop_firm_profiles (user_id,firm_name,profile_name) values ('$C','Test','$1');" >/dev/null
+  local id; id=$(as_owner "select id from public.prop_firm_profiles where user_id='$C' and profile_name='$1';" | tr -d ' \n\r')
+  as_user "$C" "insert into public.phase_rules (user_id,profile_id,phase_order,phase_kind,label) values ('$C',$id,1,'funded','Funded');" >/dev/null
+  echo "$id"
+}
+start_instance() {
+  local ph; ph=$(as_owner "select id from public.phase_rules where profile_id=$1 and phase_order=1;" | tr -d ' \n\r')
+  as_user "$C" "insert into public.challenge_instances (user_id,account_id,profile_id,current_phase_id,starting_balance,started_on,current_phase_started_on) values ('$C',$C_ACCT,$1,$ph,50000,'2026-07-01','2026-07-01');" >/dev/null
+}
+drop_instance() { as_user "$C" "delete from public.challenge_instances where user_id='$C';" >/dev/null; }
+# Rounded to a whole unit: percentage limits resolve to a long numeric scale
+# (10/100.0 * 50000), and comparing raw text would test formatting, not math.
+val() { echo "select round($1)::bigint::text from public.v_challenge_day_floors where scope='$2' and trading_day='$3';"; }
+
+M_FTMO=$(cprofile 'M FTMO static')
+as_user "$C" "insert into public.drawdown_rules (user_id,profile_id,phase_id,scope,limit_pct,pct_basis,pct_basis_source,dd_basis,measure_series) values ('$C',$M_FTMO,null,'overall',10,'initial_balance','user_specified','static','closing_balance');" >/dev/null
+as_user "$C" "insert into public.drawdown_rules (user_id,profile_id,phase_id,scope,limit_pct,pct_basis,pct_basis_source,dd_basis,measure_series) values ('$C',$M_FTMO,null,'daily',5,'initial_balance','user_specified','static','closing_balance');" >/dev/null
+
+M_TOP=$(cprofile 'M Topstep trailing')
+as_user "$C" "insert into public.drawdown_rules (user_id,profile_id,phase_id,scope,limit_amount,dd_basis,measure_series) values ('$C',$M_TOP,null,'overall',2000,'trailing','closing_balance');" >/dev/null
+
+M_APEX=$(cprofile 'M Apex lock')
+as_user "$C" "insert into public.drawdown_rules (user_id,profile_id,phase_id,scope,limit_amount,dd_basis,measure_series,trail_lock_cap_offset) values ('$C',$M_APEX,null,'overall',2500,'trailing','intraday_equity_high',100);" >/dev/null
+
+echo "  -- the day series itself"
+start_instance "$M_FTMO"
+expect_eq "Jul 6 closing balance is 50,500" "$C" \
+  "select round(closing_balance)::bigint::text from public.v_challenge_day_series where trading_day='2026-07-06';" "50500"
+expect_eq "Jul 6 day-start balance is 51,700 (Jul 3's close)" "$C" \
+  "select round(day_start_balance)::bigint::text from public.v_challenge_day_series where trading_day='2026-07-06';" "51700"
+expect_eq "high-water mark held at Jul 2's 52,500" "$C" \
+  "select round(hwm_closing_balance)::bigint::text from public.v_challenge_day_series where trading_day='2026-07-06';" "52500"
+
+echo "  -- FTMO: static, never moves off the starting balance"
+expect_eq "overall floor is 45,000 on day 1 ..." "$C" "$(val floor_value overall 2026-07-01)" "45000"
+expect_eq "... and still 45,000 on the last day" "$C" "$(val floor_value overall 2026-07-06)" "45000"
+expect_eq "daily floor is 49,200 (51,700 day-start - 5%)" "$C" "$(val floor_value daily 2026-07-06)" "49200"
+expect_eq "daily headroom is 1,300" "$C" "$(val headroom daily 2026-07-06)" "1300"
+drop_instance
+
+echo "  -- Topstep: trailing on closing balance, no lock"
+start_instance "$M_TOP"
+expect_eq "floor ratcheted to 50,500 (52,500 HWM - 2,000)" "$C" "$(val floor_value overall 2026-07-06)" "50500"
+# The trap this product exists to show: still 500 above the starting balance,
+# yet the trailing threshold has already eaten every unit of headroom.
+expect_eq "headroom is EXACTLY 0 despite being up on the account" "$C" "$(val headroom overall 2026-07-06)" "0"
+drop_instance
+
+echo "  -- Apex: trailing on intraday high, locking at start + \$100"
+start_instance "$M_APEX"
+expect_eq "with no equity marks, floor falls back to 50,000" "$C" "$(val floor_value overall 2026-07-06)" "50000"
+expect_eq "...giving 500 of headroom" "$C" "$(val headroom overall 2026-07-06)" "500"
+# A recorded intraday peak of 53,500 on Jul 2 pushes the raw trailing floor to
+# 51,000 — above the lock — so the LEAST() clamps it to 50,100. The lock is
+# emergent from the expression; there is no locked_at column anywhere.
+as_user "$C" "insert into public.equity_marks (user_id,account_id,trading_day,peak_equity) values ('$C',$C_ACCT,'2026-07-02',53500);" >/dev/null
+expect_eq "an equity mark makes the floor STRICTER, and the lock binds at 50,100" "$C" \
+  "$(val floor_value overall 2026-07-06)" "50100"
+expect_eq "headroom tightens to 400" "$C" "$(val headroom overall 2026-07-06)" "400"
+expect_eq "one marked day is not enough for all_days_marked" "$C" \
+  "select all_days_marked::text from public.v_challenge_day_series where trading_day='2026-07-06';" "false"
+
+echo "  -- an edit to an old trade moves every later floor (nothing is stored)"
+# Jul 2's win is what set the high-water mark. Deleting it must un-ratchet the
+# threshold — the exact case a stored HWM cannot survive.
+as_user "$C" "delete from public.trades where user_id='$C' and close_day='2026-07-02';" >/dev/null
+as_user "$C" "delete from public.equity_marks where user_id='$C';" >/dev/null
+expect_eq "HWM un-ratcheted to 51,000 after deleting the peak day" "$C" \
+  "select round(hwm_closing_balance)::bigint::text from public.v_challenge_day_series where trading_day='2026-07-06';" "51000"
+expect_eq "and Apex's floor followed it down to 48,500" "$C" \
+  "$(val floor_value overall 2026-07-06)" "48500"
+
 echo
 if [[ $fail -eq 0 ]]; then
   printf '\033[32m%d passed, 0 failed\033[0m\n' "$pass"
