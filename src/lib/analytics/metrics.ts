@@ -12,6 +12,11 @@
 export type ClosedTradeForMetrics = {
   pnl: number;
   r_multiple: number | null;
+  /** Optional only because a handful of already-shipped callers (the
+   *  dashboard's own currency-scoped mapping) don't have a reason to fetch
+   *  it — breakdownByHoldDuration is the only consumer, and it's the one
+   *  place a missing entry_time would matter. */
+  entry_time?: string;
   close_time: string;
   mae_amount: number | null;
   mfe_amount: number | null;
@@ -240,6 +245,43 @@ export function breakdownByHour(trades: ClosedTradeForMetrics[]): BreakdownRow[]
   return rows.sort((a, b) => a.key.localeCompare(b.key));
 }
 
+/** Same bucket boundaries as journal/day-stats.ts's DURATION_BUCKETS,
+ *  reimplemented locally rather than imported — that module's buckets key
+ *  off a different trade shape (JournalTradeRow), and this app's stated
+ *  build-plan requirement ("breakdowns by ... hold duration",
+ *  docs/build-plan.md) was documented but never built until now. Keeping
+ *  the same labels here is a deliberate consistency choice: a trade
+ *  described as "15 min – 4 hr" should mean the same thing on both pages. */
+const HOLD_DURATION_BUCKETS: { label: string; maxMinutes: number }[] = [
+  { label: "Under 15 min", maxMinutes: 15 },
+  { label: "15 min – 4 hr", maxMinutes: 240 },
+  { label: "4 hr – 1 day", maxMinutes: 1440 },
+  { label: "1 day+", maxMinutes: Infinity },
+];
+
+/** Excludes any trade missing entry_time (see ClosedTradeForMetrics'
+ *  comment) rather than guessing a duration for it. */
+export function breakdownByHoldDuration(trades: ClosedTradeForMetrics[]): BreakdownRow[] {
+  const timed = trades.filter((t): t is ClosedTradeForMetrics & { entry_time: string } =>
+    t.entry_time !== undefined,
+  );
+  // groupBy's keyFn is typed against the base ClosedTradeForMetrics (its
+  // generic signature can't see the narrowed intersection type `timed`
+  // actually holds), so entry_time reads back as possibly-undefined inside
+  // this callback even though the filter above already guarantees it —
+  // the `as string` is asserting what the filter already proved, not
+  // bypassing a real unknown.
+  const grouped = groupBy(timed, (t) => {
+    const entryTime = t.entry_time as string;
+    const minutes = (new Date(t.close_time).getTime() - new Date(entryTime).getTime()) / 60_000;
+    const bucket = HOLD_DURATION_BUCKETS.find((b) => minutes <= b.maxMinutes);
+    return (bucket ?? HOLD_DURATION_BUCKETS[HOLD_DURATION_BUCKETS.length - 1]).label;
+  });
+  const rows = toBreakdownRows(grouped);
+  const order = new Map(HOLD_DURATION_BUCKETS.map((b, i) => [b.label, i]));
+  return rows.sort((a, b) => (order.get(a.key) ?? 0) - (order.get(b.key) ?? 0));
+}
+
 export type DailySummaryForCurve = { trading_day: string; trade_pnl: number; ledger_amount: number };
 export type EquityPoint = { day: string; balance: number; drawdownFromPeak: number };
 
@@ -283,4 +325,54 @@ export function maeMfePoints(trades: ClosedTradeForMetrics[]): MaeMfePoint[] {
       mae: t.mae_amount as number,
       mfe: t.mfe_amount as number,
     }));
+}
+
+/**
+ * Kestner's K-Ratio, as the t-statistic of an OLS regression slope over the
+ * equity curve: fit balance = intercept + slope * period, then
+ * K-Ratio = slope / standard-error-of-slope. Public sources disagree on
+ * Kestner's exact normalization (his 1996 vs. revised-2011 papers differ,
+ * and most trading-tool implementations don't publish which they use) — this
+ * is the plain regression-slope-significance formula, not a claim of
+ * matching any specific vendor's output bit-for-bit. Regresses against RAW
+ * balance, not log(balance): equity can dip to or below the starting
+ * balance (even negative in a bad-enough account), and log() would break on
+ * that, whereas a zero-based linear regression handles any sign fine.
+ *
+ * Null under 3 points (a 2-point "line" has a trivially perfect, meaningless
+ * fit) or when the x-values or residual variance can't produce a real
+ * standard error (division by zero).
+ */
+export function kRatio(points: EquityPoint[]): number | null {
+  const n = points.length;
+  if (n < 3) return null;
+
+  const xs = points.map((_, i) => i + 1);
+  const ys = points.map((p) => p.balance);
+  const meanX = xs.reduce((sum, x) => sum + x, 0) / n;
+  const meanY = ys.reduce((sum, y) => sum + y, 0) / n;
+
+  let ssXX = 0;
+  let ssXY = 0;
+  for (let i = 0; i < n; i++) {
+    ssXX += (xs[i] - meanX) ** 2;
+    ssXY += (xs[i] - meanX) * (ys[i] - meanY);
+  }
+  if (ssXX === 0) return null;
+
+  const slope = ssXY / ssXX;
+  const intercept = meanY - slope * meanX;
+
+  let sse = 0;
+  for (let i = 0; i < n; i++) {
+    const predicted = intercept + slope * xs[i];
+    sse += (ys[i] - predicted) ** 2;
+  }
+  const degreesOfFreedom = n - 2;
+  if (degreesOfFreedom <= 0) return null;
+
+  const slopeStdError = Math.sqrt(sse / degreesOfFreedom / ssXX);
+  if (slopeStdError === 0) return null;
+
+  return slope / slopeStdError;
 }

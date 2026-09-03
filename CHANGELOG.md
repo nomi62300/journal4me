@@ -4,6 +4,55 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.0] — 2026-09-03
+
+### Added — M9d: reports gap-fill
+- **K-Ratio** (`kRatio()` in `src/lib/analytics/metrics.ts`) — the t-statistic of an OLS
+  regression slope over the account's equity curve (`slope / standard-error-of-slope`),
+  regressed against raw balance rather than log-balance since equity can dip to or below the
+  starting balance and `log()` breaks on that. Public sources genuinely disagree on Kestner's
+  exact normalization (his 1996 vs. revised-2011 papers differ), so this is documented as *the*
+  plain regression-slope-significance formula, not a claim of matching any one vendor's output.
+  Null under 3 equity-curve points or a perfectly linear curve (zero residual variance means a
+  literal division by zero, not a number to fabricate) — same "don't invent a figure from
+  insufficient data" convention every other metric here already follows.
+- **Hold-duration breakdown** (`breakdownByHoldDuration()`) — `docs/build-plan.md` has listed
+  this as required since the original plan ("breakdowns by symbol, strategy, day of week,
+  session/hour **and hold duration**") but it was never built; confirmed via grep before
+  starting, not assumed. Same 4 buckets as the Journal List view's own duration filter (Under 15
+  min / 15 min–4 hr / 4 hr–1 day / 1 day+), reimplemented locally rather than imported since the
+  two modules key off different trade shapes — kept label-consistent on purpose so "15 min–4 hr"
+  means the same thing on both pages. Wired in as a 5th tab on the existing Breakdowns card;
+  `BreakdownBarList` needed zero changes.
+- **Longest win/loss streaks** surfaced on `/analytics`'s Current Streak card (`longestWinStreak`/
+  `longestLossStreak`, added to `computeCoreMetrics` in M9b) — previously computed but only shown
+  on the dashboard.
+- `ClosedTradeForMetrics` gained an optional `entry_time` field (needed for hold-duration; kept
+  optional rather than required so the dashboard's own already-shipped mapping, which has no
+  reason to fetch it, doesn't need touching), and `listClosedTradesForAnalytics` now selects it.
+- **Explicitly skipped, per the plan**: Liquidity and TR/ATR reports (low relevance to this
+  audience, no data source), a weekday×hour combined matrix (nice-to-have, not required for
+  parity).
+
+### Verified live
+`npx tsc --noEmit` clean (one real type error caught and fixed along the way — `groupBy`'s
+generic `keyFn` signature can't see a narrowed intersection type from an outer `.filter()`, so
+`entry_time` read back as possibly-`undefined` inside the callback even after the filter
+guaranteed it; fixed with a documented `as string` asserting what the filter already proved).
+`npm run lint` clean, `npm run test:rls` and `npm run test:prop` unaffected at 101/101 and
+134/134. **K-Ratio's regression math was unit-tested in isolation before it ever touched the
+UI**: a small Node script computing `kRatio([100,105,103,110,108])` by hand (slope 2.1,
+standard error 0.7895) matched the implementation's `2.6598...` exactly; a perfectly linear
+series and a 2-point series both correctly returned `null` rather than `Infinity`/`NaN`. Then
+seeded 5 real trades across 5 days with deliberately varied hold times (5 min, 2.5 hr, 6 hr,
+2 days, 10 min) and confirmed every hold-duration bucket's trade count, win rate and net P&L by
+hand against the seed data, confirmed the longest-streak figures (3W/2L) against the actual
+win/loss sequence, and confirmed K-Ratio computed a real number end-to-end through the live
+`daily_summaries` pipeline (not just the isolated unit test). Also hit and worked around a real
+tool issue: a synthetic `.click()` via `javascript_tool` didn't activate the Radix tab (the
+`data-state` never changed), where the `computer` tool's real click did — a distinction worth
+remembering for future verification passes in this environment.
+
 ## [0.33.0] — 2026-09-03
 
 ### Added — M9c: journal parity pass

@@ -37,7 +37,7 @@ export async function listClosedTradesForAnalytics(
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("trades")
-    .select("pnl, r_multiple, exit_time, mae_amount, mfe_amount, symbol, strategies(name)")
+    .select("pnl, r_multiple, entry_time, exit_time, mae_amount, mfe_amount, symbol, strategies(name)")
     .eq("account_id", accountId)
     .eq("is_open", false)
     .not("pnl", "is", null);
@@ -51,6 +51,7 @@ export async function listClosedTradesForAnalytics(
     const r = row as unknown as {
       pnl: number;
       r_multiple: number | null;
+      entry_time: string;
       exit_time: string;
       mae_amount: number | null;
       mfe_amount: number | null;
@@ -60,6 +61,7 @@ export async function listClosedTradesForAnalytics(
     return {
       pnl: r.pnl,
       r_multiple: r.r_multiple,
+      entry_time: r.entry_time,
       close_time: r.exit_time,
       mae_amount: r.mae_amount,
       mfe_amount: r.mfe_amount,

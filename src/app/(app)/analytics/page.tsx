@@ -9,6 +9,7 @@ import { RDistributionChart } from "@/components/analytics/r-distribution-chart"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  breakdownByHoldDuration,
   breakdownByHour,
   breakdownByStrategy,
   breakdownBySymbol,
@@ -16,6 +17,7 @@ import {
   buildEquityCurve,
   computeCoreMetrics,
   computeRDistribution,
+  kRatio,
   maeMfePoints,
 } from "@/lib/analytics/metrics";
 import {
@@ -66,7 +68,9 @@ export default async function AnalyticsPage({
   const strategyRows = breakdownByStrategy(closedTrades);
   const weekdayRows = breakdownByWeekday(closedTrades);
   const hourRows = breakdownByHour(closedTrades);
+  const holdDurationRows = breakdownByHoldDuration(closedTrades);
   const maeMfe = maeMfePoints(closedTrades);
+  const kRatioValue = kRatio(equityPoints);
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-6 p-4 md:p-6">
@@ -122,10 +126,16 @@ export default async function AnalyticsPage({
                 }`
           }
           tone={metrics.currentStreak > 0 ? "win" : metrics.currentStreak < 0 ? "loss" : "neutral"}
+          sub={`longest: ${metrics.longestWinStreak}W / ${metrics.longestLossStreak}L`}
         />
         <KpiCard
           label="Gross profit / loss"
           value={`${formatMoney(metrics.grossProfit, account.currency)} / ${formatMoney(metrics.grossLoss, account.currency)}`}
+        />
+        <KpiCard
+          label="K-Ratio"
+          value={kRatioValue === null ? "—" : kRatioValue.toFixed(2)}
+          sub={kRatioValue === null ? "needs 3+ days of activity" : "equity-curve consistency"}
         />
       </div>
 
@@ -171,7 +181,9 @@ export default async function AnalyticsPage({
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Breakdowns</CardTitle>
-          <CardDescription>Net P&amp;L by symbol, strategy, weekday and hour.</CardDescription>
+          <CardDescription>
+            Net P&amp;L by symbol, strategy, weekday, hour and hold duration.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="symbol">
@@ -180,6 +192,7 @@ export default async function AnalyticsPage({
               <TabsTrigger value="strategy">Strategy</TabsTrigger>
               <TabsTrigger value="weekday">Day of week</TabsTrigger>
               <TabsTrigger value="hour">Hour</TabsTrigger>
+              <TabsTrigger value="duration">Hold duration</TabsTrigger>
             </TabsList>
             <TabsContent value="symbol" className="pt-4">
               <BreakdownBarList
@@ -205,6 +218,13 @@ export default async function AnalyticsPage({
             <TabsContent value="hour" className="pt-4">
               <BreakdownBarList
                 rows={hourRows}
+                currency={account.currency}
+                emptyLabel="No closed trades yet."
+              />
+            </TabsContent>
+            <TabsContent value="duration" className="pt-4">
+              <BreakdownBarList
+                rows={holdDurationRows}
                 currency={account.currency}
                 emptyLabel="No closed trades yet."
               />
