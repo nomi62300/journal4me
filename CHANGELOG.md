@@ -4,6 +4,44 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.0] — 2026-09-03
+
+### Added — M6b (part 2): `rule_status()`, the single rule contract
+- `public.rule_status(account_ids[])` returns one row per account per rule — daily loss,
+  overall drawdown, profit target, minimum trading days and consistency — each with a status,
+  headroom or cure amount, a meter percentage, and an explicit `confidence` / `estimate_bias`.
+  It exists as **one function** rather than as TypeScript over the views because a push alert
+  saying "80% of your daily limit" while the screen says 60% destroys trust in both.
+  `SECURITY INVOKER`, so tenant RLS applies to every input.
+- `public.max_loss_today(account_id)` — the hero number. Daily loss and overall drawdown are
+  independent meters, so a trader can plan a loss that respects the daily limit and still blow
+  the overall floor; this returns the distance to whichever floor actually binds. It reads
+  `rule_status` rather than recomputing, so it can never disagree with the meters beside it.
+- **Consistency is modelled as a curable gate, not a breach** (`gate_blocked`, with a
+  `cure_amount`): "your best day is 300% of net profit against a 30% cap — you need 4,500 more
+  total profit to clear it." Verified against the build plan's own worked example.
+- The floor formula moved into three IMMUTABLE helpers (`prop.resolve_limit`,
+  `prop.drawdown_anchor`, `prop.drawdown_floor`) now called by **both**
+  `v_challenge_day_floors` and `rule_status`. Leaving the `LEAST()` inside the view and
+  re-typing it in the function would have been precisely the drift this layering exists to
+  prevent. All 92 pre-existing floor assertions still pass unchanged after the refactor.
+- Deliberately not emitted yet: withdrawal eligibility. It is a gate measured in *days*, and
+  folding days into the same `cure_amount` column that otherwise holds money is the kind of
+  unit collision that produces a confidently wrong UI.
+
+### Fixed — a confidence bug found live, of exactly the kind §7 exists to prevent
+`rule_status` was attaching the intraday-equity explanation and an `optimistic` bias to
+**closing-balance** rules whose only uncertainty was a stale reconciliation. The numbers were
+right, but the *explanation* was wrong and looked actionable — it would have sent users off to
+record equity peaks that cannot change the answer. Reason and bias are now gated on the actual
+equity gap, and reconciliation staleness carries no bias because its direction is unknown.
+
+### Verified
+`npm run test:prop` is now 113 assertions, including the plan's confidence-honesty test: an
+equity-based rule stays `estimated`/`optimistic` until every day carries a mark, then becomes
+`exact` — and the honest floor is **stricter** (50,100 vs the 50,000 guess), which is the
+entire argument for not guessing.
+
 ## [0.22.0] — 2026-09-03
 
 ### Added — M6b (part 1): the day series and the drawdown floor

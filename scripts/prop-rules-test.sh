@@ -408,6 +408,95 @@ expect_eq "HWM un-ratcheted to 51,000 after deleting the peak day" "$C" \
 expect_eq "and Apex's floor followed it down to 48,500" "$C" \
   "$(val floor_value overall 2026-07-06)" "48500"
 
+# ===========================================================================
+echo
+echo "==> rule_status() — the single UI contract"
+# ===========================================================================
+# Same four-day series again (50,000 -> 50,500, HWM 52,500), now read through
+# the contract the dashboard and the notifier will both call. Every expected
+# figure is hand-computed:
+#   overall  10% of 50,000 = 5,000 -> floor 45,000, headroom 5,500
+#   daily     5% of 50,000 = 2,500 -> today opens at 50,500 -> floor 48,000
+#   target   10% of 50,000 = 5,000, made 500 so far -> 4,500 to go, 10%
+#   consistency: best day 1,500 on net 500 = 300% against a 30% cap,
+#                cure = 1,500/0.30 - 500 = 4,500
+D=$(mk_user "prop_d_${STAMP}@journal4me.test")
+[[ -n "$D" ]] || { echo "could not create user D"; exit 1; }
+as_user "$D" "insert into public.accounts (user_id,name,account_type,starting_balance,currency,reset_timezone) values ('$D','D prop','prop_firm',50000,'USD','UTC');" >/dev/null
+D_ACCT=$(as_owner "select id from public.accounts where user_id='$D' limit 1;" | tr -d ' \n\r')
+for spec in "2026-07-01:1000" "2026-07-02:1500" "2026-07-03:-800" "2026-07-06:-1200"; do
+  d=${spec%%:*}; p=${spec#*:}
+  as_user "$D" "insert into public.trades (user_id,account_id,symbol,direction,entry_price,size,entry_time,exit_time,pnl) values ('$D',$D_ACCT,'EURUSD','long',1.1,1,'${d}T08:00:00Z','${d}T13:00:00Z',$p);" >/dev/null
+done
+
+dprofile() {
+  as_user "$D" "insert into public.prop_firm_profiles (user_id,firm_name,profile_name) values ('$D','Test','$1');" >/dev/null
+  local id; id=$(as_owner "select id from public.prop_firm_profiles where user_id='$D' and profile_name='$1';" | tr -d ' \n\r')
+  as_user "$D" "insert into public.phase_rules (user_id,profile_id,phase_order,phase_kind,label,profit_target_pct,profit_target_basis,min_trading_days) values ('$D',$id,1,'funded','Funded',10,'initial_balance',4);" >/dev/null
+  echo "$id"
+}
+d_start() {
+  local ph; ph=$(as_owner "select id from public.phase_rules where profile_id=$1 and phase_order=1;" | tr -d ' \n\r')
+  as_user "$D" "insert into public.challenge_instances (user_id,account_id,profile_id,current_phase_id,starting_balance,started_on,current_phase_started_on) values ('$D',$D_ACCT,$1,$ph,50000,'2026-07-01','2026-07-01');" >/dev/null
+}
+d_drop() { as_user "$D" "delete from public.challenge_instances where user_id='$D';" >/dev/null; }
+rs()  { echo "select round($1,2)::text from public.rule_status() where rule_key='$2';"; }
+rst() { echo "select $1 from public.rule_status() where rule_key='$2';"; }
+
+D_CLOSE=$(dprofile 'D closing-balance rules')
+as_user "$D" "insert into public.drawdown_rules (user_id,profile_id,scope,limit_pct,pct_basis,pct_basis_source,dd_basis,measure_series) values ('$D',$D_CLOSE,'overall',10,'initial_balance','user_specified','static','closing_balance');" >/dev/null
+as_user "$D" "insert into public.drawdown_rules (user_id,profile_id,scope,limit_pct,pct_basis,pct_basis_source,dd_basis,measure_series) values ('$D',$D_CLOSE,'daily',5,'initial_balance','user_specified','static','closing_balance');" >/dev/null
+as_user "$D" "insert into public.consistency_rules (user_id,profile_id,label,max_share_pct,denominator,window_start,evaluated_at,applies_from) values ('$D',$D_CLOSE,'30% consistency',30,'net_profit','challenge_start','withdrawal_request','always');" >/dev/null
+d_start "$D_CLOSE"
+
+expect_eq "overall drawdown floor is 45,000"        "$D" "$(rs floor_value overall_drawdown)" "45000.00"
+expect_eq "overall headroom is 5,500"               "$D" "$(rs headroom overall_drawdown)" "5500.00"
+expect_eq "daily floor is 48,000 (today opens at 50,500)" "$D" "$(rs floor_value daily_loss)" "48000.00"
+expect_eq "daily headroom is the full 2,500 allowance"    "$D" "$(rs headroom daily_loss)" "2500.00"
+expect_eq "profit target: 4,500 still to go"        "$D" "$(rs headroom profit_target)" "4500.00"
+expect_eq "profit target: 10% of the way there"     "$D" "$(rs pct_used profit_target)" "0.10"
+expect_eq "min trading days satisfied (4 of 4)"     "$D" "$(rst is_satisfied::text min_trading_days)" "true"
+expect_eq "consistency is a GATE, not a breach"     "$D" "$(rst status consistency)" "gate_blocked"
+expect_eq "consistency cure amount is 4,500"        "$D" "$(rs cure_amount consistency)" "4500.00"
+# The hero number: daily binds before overall, so 2,500 is the real answer to
+# "how much can I lose right now", not the 5,500 the overall meter shows.
+expect_eq "max_loss_today picks the BINDING floor (2,500)" "$D" \
+  "select round(public.max_loss_today($D_ACCT),2)::text;" "2500.00"
+
+echo "  -- confidence must name the RIGHT source of doubt"
+# Never reconciled, but these are closing-balance rules: the app knows the
+# numbers exactly, so the doubt is staleness, whose direction is unknown.
+# Claiming an optimistic equity bias here would send the user off recording
+# peaks that cannot change the answer.
+expect_eq "unreconciled account is not shown as exact" "$D" "$(rst confidence overall_drawdown)" "estimated"
+expect_eq "...but with NO bias, since staleness has no direction" "$D" \
+  "select coalesce(estimate_bias,'(null)') from public.rule_status() where rule_key='overall_drawdown';" "(null)"
+expect_eq "...and the reason talks about reconciliation, not equity" "$D" \
+  "select (confidence_reason like '%reconciled%' and confidence_reason not like '%equity%')::text from public.rule_status() where rule_key='overall_drawdown';" "true"
+as_user "$D" "insert into public.balance_reconciliations (user_id,account_id,as_of,firm_reported_balance) values ('$D',$D_ACCT,current_date,50500);" >/dev/null
+expect_eq "a fresh reconciliation restores 'exact'" "$D" "$(rst confidence overall_drawdown)" "exact"
+
+echo "  -- an equity-based rule is honest about what it cannot see"
+d_drop
+D_INTRA=$(dprofile 'D intraday rules')
+as_user "$D" "insert into public.drawdown_rules (user_id,profile_id,scope,limit_amount,dd_basis,measure_series,trail_lock_cap_offset) values ('$D',$D_INTRA,'overall',2500,'trailing','intraday_equity_high',100);" >/dev/null
+d_start "$D_INTRA"
+expect_eq "reconciled, but equity is still unseen -> estimated" "$D" "$(rst confidence overall_drawdown)" "estimated"
+expect_eq "...and THIS one is optimistically biased" "$D" "$(rst estimate_bias overall_drawdown)" "optimistic"
+expect_eq "...with a reason that names equity" "$D" \
+  "select (confidence_reason like '%equity%')::text from public.rule_status() where rule_key='overall_drawdown';" "true"
+expect_eq "floor falls back to 50,000 with no marks" "$D" "$(rs floor_value overall_drawdown)" "50000.00"
+
+for spec in "2026-07-01:51200" "2026-07-02:53500" "2026-07-03:52000" "2026-07-06:51000"; do
+  d=${spec%%:*}; pk=${spec#*:}
+  as_user "$D" "insert into public.equity_marks (user_id,account_id,trading_day,peak_equity) values ('$D',$D_ACCT,'$d',$pk);" >/dev/null
+done
+expect_eq "marking every day upgrades it to EXACT" "$D" "$(rst confidence overall_drawdown)" "exact"
+expect_eq "...the bias disappears with the guesswork" "$D" \
+  "select coalesce(estimate_bias,'(null)') from public.rule_status() where rule_key='overall_drawdown';" "(null)"
+expect_eq "...and the true floor is stricter: the lock binds at 50,100" "$D" \
+  "$(rs floor_value overall_drawdown)" "50100.00"
+
 echo
 if [[ $fail -eq 0 ]]; then
   printf '\033[32m%d passed, 0 failed\033[0m\n' "$pass"
