@@ -4,6 +4,44 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] — 2026-09-03
+
+### Added — M4: CSV import
+- `/trades/import` — a 4-step wizard (Upload → Map columns → Preview → Done). Column mapping is
+  mandatory by design: the owner's real export files (`Wicktor Trades/*.csv`, verified against
+  directly) come in two genuinely incompatible header formats — one has no size/quantity column
+  at all, the other uses epoch-millisecond timestamps, multi-take-profit fills, and real open
+  positions — so a fixed parser would silently mis-read one of them.
+- Auto-suggested mapping (header aliases, direction-value guessing, time-format detection) that
+  is always fully editable and never silently trusted — verified live against real slices of
+  both formats, correctly auto-mapping symbol/direction/prices/times/pnl/grade in one pass,
+  correctly leaving `size` unmapped for the size-less format (needs a fixed value instead) and
+  correctly *not* aliasing `stop_distance` to a stop price (it's a distance, not a price —
+  computing an actual stop would need direction-dependent sign math this milestone doesn't do,
+  so `r_multiple` stays honestly null for these imports rather than a wrong non-null value).
+- Every target field accepts a source **column**, a **fixed value** (the only way to supply
+  `size` for a file that never recorded it), or nothing — plus multi-column tag sources (any
+  subset of columns, each value becomes a tag) and three duplicate-protection modes (a natural
+  id column, an auto-generated content hash, or none).
+- The bulk write is one atomic `upsert(..., { ignoreDuplicates: true })` — matches how the
+  statement-level trade-quota trigger is designed to work (see `20260902091542_...sql`):
+  chunking the import into several smaller inserts would let earlier chunks land before a later
+  one hits the plan's monthly cap, leaving a half-imported file. Verified live: importing the
+  same real file twice imports N trades once, then reports "0 imported, N already existed" on
+  the second pass, with the database still holding exactly N rows.
+
+### Fixed — a real bug, found live on the very first import attempt
+`trades_external_id_key` was a **partial** unique index (`where external_id is not null`).
+Supabase's `.upsert(..., { onConflict: 'account_id,external_id' })` generates a plain
+`ON CONFLICT (account_id, external_id)` with no `WHERE` clause, and Postgres requires an exact
+match to infer a conflict target — a column list alone cannot infer a partial index, only a full
+one, and there is no way to pass the missing predicate through the high-level upsert API
+(Postgres error `42P10`: "no unique or exclusion constraint matching the ON CONFLICT
+specification"). Fixed by dropping the partial predicate: Postgres's standard NULL semantics
+(a unique index never treats two NULLs as equal) already make a full index behave identically
+for what this schema needs — multiple NULL-`external_id` rows still never conflict with each
+other, which was the only property `where external_id is not null` was actually protecting.
+
 ## [0.17.0] — 2026-09-02
 
 ### Added — onboarding wizard v2: platform/currency pickers, phase-aware prop-firm rules

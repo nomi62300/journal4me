@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import type { Metadata } from "next";
-import { LineChart, Plus } from "lucide-react";
+import { LineChart, Plus, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { TradeFilterBar } from "@/components/trades/trade-filter-bar";
@@ -33,12 +33,20 @@ export default async function TradesPage({
     <div className="mx-auto max-w-5xl p-4 md:p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold tracking-tight">Trades</h1>
-        <Button asChild size="sm" className="gap-1.5">
-          <Link href="/trades/new">
-            <Plus className="size-4" />
-            Log trade
-          </Link>
-        </Button>
+        <div className="flex gap-2">
+          <Button asChild variant="outline" size="sm" className="gap-1.5">
+            <Link href="/trades/import">
+              <Upload className="size-4" />
+              Import CSV
+            </Link>
+          </Button>
+          <Button asChild size="sm" className="gap-1.5">
+            <Link href="/trades/new">
+              <Plus className="size-4" />
+              Log trade
+            </Link>
+          </Button>
+        </div>
       </div>
 
       <div className="mb-4">
