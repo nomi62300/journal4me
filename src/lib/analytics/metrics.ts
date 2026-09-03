@@ -45,6 +45,11 @@ export type CoreMetrics = {
    *  losses, 0 if the most recent closed trade was a breakeven or there
    *  are no closed trades. Computed off close_time order. */
   currentStreak: number;
+  /** Longest run of consecutive wins/losses anywhere in the trade set, not
+   *  just the current one — a breakeven trade resets both runs, same as it
+   *  ends currentStreak above. */
+  longestWinStreak: number;
+  longestLossStreak: number;
 };
 
 export function computeCoreMetrics(trades: ClosedTradeForMetrics[]): CoreMetrics {
@@ -76,6 +81,33 @@ export function computeCoreMetrics(trades: ClosedTradeForMetrics[]): CoreMetrics
     }
   }
 
+  // Separate ascending-order pass for the longest runs — kept apart from
+  // the descending currentStreak walk above rather than merged into one
+  // loop, since "current, walking backward, stop at the first flip" and
+  // "longest anywhere, walking forward, keep going" are different enough
+  // questions that combining them would obscure both.
+  const sortedByCloseAsc = [...trades].sort(
+    (a, b) => new Date(a.close_time).getTime() - new Date(b.close_time).getTime(),
+  );
+  let longestWinStreak = 0;
+  let longestLossStreak = 0;
+  let runWin = 0;
+  let runLoss = 0;
+  for (const t of sortedByCloseAsc) {
+    if (t.pnl > 0) {
+      runWin += 1;
+      runLoss = 0;
+    } else if (t.pnl < 0) {
+      runLoss += 1;
+      runWin = 0;
+    } else {
+      runWin = 0;
+      runLoss = 0;
+    }
+    longestWinStreak = Math.max(longestWinStreak, runWin);
+    longestLossStreak = Math.max(longestLossStreak, runLoss);
+  }
+
   return {
     tradeCount,
     netPnl,
@@ -93,7 +125,36 @@ export function computeCoreMetrics(trades: ClosedTradeForMetrics[]): CoreMetrics
     expectancyR: rTrades.length > 0 ? rSum / rTrades.length : null,
     rTradeCount: rTrades.length,
     currentStreak,
+    longestWinStreak,
+    longestLossStreak,
   };
+}
+
+/**
+ * Van Tharp's System Quality Number: sqrt(n) * (mean R / stdev R), over
+ * trades with a defined r_multiple (a stop was set — see
+ * ClosedTradeForMetrics' own comment on why an undefined R stays excluded
+ * rather than averaged in as zero). Sample standard deviation (n-1): this
+ * is an estimate from a sample of trades, not the full population of every
+ * trade the strategy will ever produce.
+ *
+ * Null below 2 R-tagged trades (a 1-point sample has no standard
+ * deviation) and when every R value is identical (stdev = 0 -> division by
+ * zero) — both are "not enough signal yet" states, not a number to fabricate.
+ */
+export function sqn(trades: ClosedTradeForMetrics[]): number | null {
+  const rValues = trades
+    .filter((t) => t.r_multiple !== null)
+    .map((t) => t.r_multiple as number);
+  if (rValues.length < 2) return null;
+
+  const mean = rValues.reduce((sum, r) => sum + r, 0) / rValues.length;
+  const variance =
+    rValues.reduce((sum, r) => sum + (r - mean) ** 2, 0) / (rValues.length - 1);
+  const stdev = Math.sqrt(variance);
+  if (stdev === 0) return null;
+
+  return Math.sqrt(rValues.length) * (mean / stdev);
 }
 
 /** Fixed R-multiple buckets — wide enough to hold outlier trades in the

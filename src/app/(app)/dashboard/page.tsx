@@ -3,7 +3,11 @@ import Link from "next/link";
 import { ArrowUpRight, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 
 import { AccountCard } from "@/components/accounts/account-card";
+import { BreakdownBarList } from "@/components/analytics/breakdown-bar-list";
+import { AvgWinLossBar } from "@/components/dashboard/avg-win-loss-bar";
 import { CalendarHeatmap } from "@/components/dashboard/calendar-heatmap";
+import { ProfitFactorGauge } from "@/components/dashboard/profit-factor-gauge";
+import { WinLossDonut } from "@/components/dashboard/win-loss-donut";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +19,12 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { listAccounts } from "@/lib/accounts/queries";
+import {
+  breakdownByHour,
+  computeCoreMetrics,
+  sqn,
+  type ClosedTradeForMetrics,
+} from "@/lib/analytics/metrics";
 import { formatMoney } from "@/lib/format";
 import { listTrades } from "@/lib/trades/queries";
 import { requireUser } from "@/lib/auth/session";
@@ -92,6 +102,23 @@ export default async function DashboardPage() {
     .filter((t) => t.account_currency === calendarCurrency && t.close_day !== null)
     .map((t) => ({ close_day: t.close_day as string, pnl: t.pnl as number }));
   const excludedCurrencyCount = closedTrades.length - calendarTrades.length;
+
+  // Same currency scope as the calendar above — every widget below is
+  // computed off this one set, never mixed across currencies.
+  const metricsTrades: ClosedTradeForMetrics[] = closedTrades
+    .filter((t) => t.account_currency === calendarCurrency)
+    .map((t) => ({
+      pnl: t.pnl as number,
+      r_multiple: t.r_multiple,
+      close_time: t.exit_time as string,
+      mae_amount: t.mae_amount,
+      mfe_amount: t.mfe_amount,
+      symbol: t.symbol,
+      strategy_name: t.strategy_name,
+    }));
+  const core = computeCoreMetrics(metricsTrades);
+  const hourlyRows = breakdownByHour(metricsTrades);
+  const sqnValue = sqn(metricsTrades);
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6 p-6">
@@ -199,6 +226,102 @@ export default async function DashboardPage() {
           />
         </CardContent>
       </Card>
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Profit factor</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ProfitFactorGauge profitFactor={core.profitFactor} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Winning vs losing trades</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <WinLossDonut
+              winCount={core.winCount}
+              lossCount={core.lossCount}
+              breakevenCount={core.breakevenCount}
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Avg winning vs losing trade</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <AvgWinLossBar
+              avgWin={core.avgWin}
+              avgLoss={core.avgLoss}
+              currency={calendarCurrency ?? "USD"}
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Hourly</CardTitle>
+          </CardHeader>
+          <CardContent className="max-h-[220px] overflow-y-auto">
+            <BreakdownBarList
+              rows={hourlyRows}
+              currency={calendarCurrency ?? "USD"}
+              emptyLabel="No closed trades yet."
+            />
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Card>
+          <CardHeader>
+            <CardDescription>Largest gain</CardDescription>
+            <CardTitle className="text-xl tabular-nums text-emerald-600 dark:text-emerald-400">
+              {core.largestWin === null
+                ? "—"
+                : formatMoney(core.largestWin, calendarCurrency ?? "USD")}
+            </CardTitle>
+          </CardHeader>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardDescription>Total gain / loss</CardDescription>
+            <CardTitle
+              className={cn(
+                "text-xl tabular-nums",
+                core.netPnl > 0 && "text-emerald-600 dark:text-emerald-400",
+                core.netPnl < 0 && "text-destructive",
+              )}
+            >
+              {core.tradeCount === 0
+                ? "—"
+                : formatMoney(core.netPnl, calendarCurrency ?? "USD")}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-muted-foreground text-xs">
+            {formatMoney(core.grossProfit, calendarCurrency ?? "USD")} gross win ·{" "}
+            {formatMoney(core.grossLoss, calendarCurrency ?? "USD")} gross loss
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardDescription>SQN</CardDescription>
+            <CardTitle className="text-xl tabular-nums">
+              {sqnValue === null ? "—" : sqnValue.toFixed(2)}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-muted-foreground text-xs">
+            System Quality Number — needs 2+ trades with a stop set.
+          </CardContent>
+        </Card>
+      </div>
 
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between">

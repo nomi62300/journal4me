@@ -4,6 +4,54 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.0] — 2026-09-03
+
+### Added — M9b: dashboard parity pass
+- **Four new dashboard widgets** (`src/components/dashboard/`): `ProfitFactorGauge` (a custom SVG
+  semicircle arc, not a chart-library component — a continuous gauge needle needs precise
+  positioning a generic chart wouldn't give cleanly), `WinLossDonut` (Recharts `PieChart`,
+  win/loss/breakeven), `AvgWinLossBar` (a plain bidirectional bar, matching
+  `BreakdownBarList`'s existing "plain divs over a chart library" convention for anything that's
+  really just one ranked comparison). The **hourly widget needed zero new code** — it reuses
+  `src/components/analytics/breakdown-bar-list.tsx` and the already-existing `breakdownByHour`
+  from `metrics.ts` as-is, confirmed during M9a's planning research that this data was already
+  computed and simply never surfaced on the dashboard.
+- **Two genuinely new metrics in `src/lib/analytics/metrics.ts`**: `sqn()` (Van Tharp's System
+  Quality Number, `sqrt(n) * meanR/stdevR` over R-tagged trades, sample stdev) and
+  `longestWinStreak`/`longestLossStreak` added to `computeCoreMetrics`'s existing streak walk
+  (which previously only tracked the *current* streak). Both null-safe for small samples rather
+  than fabricating a number from insufficient data (SQN needs 2+ R-tagged trades and a nonzero
+  spread; both return `null` otherwise, matching every other metric's convention here).
+- **K-Ratio deliberately deferred to M9d, not built here** — a real scope resolution the
+  original M9 plan left ambiguous ("M9b/d"). SQN only needs R-multiples, already available
+  portfolio-wide with no new query. K-Ratio needs a clean equity curve, which only exists today
+  as a per-account series (`daily_summaries`) — building a meaningful cross-account, cross-
+  currency equity curve just to feed one dashboard stat card would be disproportionate new
+  scope for this pass. It belongs on `/analytics`, which is already single-account and already
+  has the equity curve it needs (M9d).
+- All five new widgets follow the **same currency-scoping discipline the calendar already
+  established**: one `metricsTrades` array, filtered to the primary currency exactly like the
+  existing `calendarTrades`, feeding every new widget — never a second, differently-scoped
+  computation that could silently drift from what the calendar shows.
+
+### Fixed
+- Nothing new — M9a's hydration-gate fix (`ThemeToggle`'s `mounted` state) already covers every
+  page, dashboard included; confirmed via a clean dev-server log tail across this milestone's
+  entire verification pass, no new console errors from the new SVG/Recharts widgets.
+
+### Verified live
+`npx tsc --noEmit` clean, `npm run lint` clean, `npm run test:rls` and `npm run test:prop`
+unaffected at 101/101 and 134/134 (no schema touched). Seeded 8 real closed trades across 2
+accounts note — one account, mixed symbols/hours/outcomes — via direct SQL and hand-verified
+the two new formulas against the seeded data before trusting the UI: profit factor
+$3,100 gross win / $1,150 gross loss = 2.6957, displayed 2.70; SQN computed by hand from the 8
+trades' R-multiples (mean R 5.183, sample stdev 14.30, n=8) = 1.025, displayed 1.02 — both
+match. Confirmed the gauge's CSS custom properties resolve to real, theme-correct RGB values
+(not an unresolved `var(--x)` literal) in both light and dark mode via computed styles, not
+just visual inspection, since this session's screenshot tool proved unreliable after scrolling
+throughout — a tooling limitation, not a rendering bug, worth noting for future verification
+passes in this environment.
+
 ## [0.31.0] — 2026-09-03
 
 ### Added — M9a: design system fixes, Accounts IA, NY default
