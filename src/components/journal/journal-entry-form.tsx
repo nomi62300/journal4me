@@ -10,16 +10,50 @@
  */
 
 import { useActionState, useEffect, useRef, useState, useTransition } from "react";
+import { FileText } from "lucide-react";
 import { toast } from "sonner";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { saveJournalEntry } from "@/lib/journal/actions";
 import type { JournalEntryFormState } from "@/lib/journal/schema";
 import type { JournalEntry } from "@/lib/journal/types";
+
+/**
+ * Canned skeletons, not a user-authored templates table — the smallest
+ * version of "insert template" that's still useful, kept as static
+ * constants rather than new schema/CRUD until someone actually wants to
+ * write their own. Each targets one specific field rather than a single
+ * generic note box, since this journal already splits plan/review/lessons
+ * apart instead of using one free-text box like the layout this was
+ * modelled after.
+ */
+const TEMPLATES = [
+  {
+    label: "Pre-market plan",
+    field: "preMarketPlan",
+    text: "Bias:\n\nKey levels:\n\nSetup(s) I'm watching for:\n\nWhat invalidates the plan:\n",
+  },
+  {
+    label: "Post-session review",
+    field: "postSessionReview",
+    text: "What I planned vs. what happened:\n\nDid I follow my rules:\n\nBest decision today:\n\nWorst decision today:\n",
+  },
+  {
+    label: "Loss review",
+    field: "postSessionReview",
+    text: "What went wrong:\n\nProcess error or bad luck:\n\nWhat I'll do differently next time:\n",
+  },
+] as const;
 
 export function JournalEntryForm({
   entryDate,
@@ -44,6 +78,12 @@ export function JournalEntryForm({
     if (state.formError) toast.error(state.formError);
   }, [state.formError]);
 
+  function insertTemplate(template: (typeof TEMPLATES)[number]) {
+    const setter = template.field === "preMarketPlan" ? setPreMarketPlan : setPostSessionReview;
+    setter((prev) => (prev ? `${prev}\n\n${template.text}` : template.text));
+    toast.success(`${template.label} template inserted.`);
+  }
+
   return (
     <form
       onSubmit={(e) => {
@@ -65,6 +105,22 @@ export function JournalEntryForm({
             <AlertDescription>{state.formError}</AlertDescription>
           </Alert>
         ) : null}
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button type="button" variant="outline" size="sm" className="self-start gap-1.5">
+              <FileText className="size-3.5" />
+              Insert template
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            {TEMPLATES.map((template) => (
+              <DropdownMenuItem key={template.label} onSelect={() => insertTemplate(template)}>
+                {template.label}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <Field>
           <FieldLabel htmlFor="j-mood">Mood</FieldLabel>

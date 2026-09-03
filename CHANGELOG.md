@@ -4,6 +4,72 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.33.0] — 2026-09-03
+
+### Added — M9c: journal parity pass
+- **A List view alongside the existing Calendar** (`/journal`, `Tabs`, List default) — the
+  Tradervue-style day-by-day feed the original month calendar never tried to be. The calendar
+  stays exactly as it was (still a genuinely good "month at a glance" view); List is additive,
+  not a replacement.
+- **`src/lib/journal/day-stats.ts`** — new pure functions (no I/O, same fixture-verifiable
+  discipline as `analytics/metrics.ts`): `buildDayRows` (unions journal entries and closed
+  trades into one date-keyed list — a pure-planning day with no trades and a pure-trading day
+  with no note both show up), `resolvePrimaryCurrency`, `computeDayStats`, `filterDayRows`,
+  `mostCommonTags`. `computeDayStats` follows the **same currency-scoping discipline as
+  everything else in this codebase**: one primary currency resolved once across all the user's
+  trades (not per-day), with an excluded-count footnote when a day has trades in another
+  currency — same pattern the dashboard and strategy analytics already use.
+- **Filter bar** (`journal-filter-bar.tsx`): symbol, tags (popover multi-select sourced from
+  `mostCommonTags`, not a separate taxonomy table — trades' existing free-text `tags` are the
+  only tag concept in this schema), side, duration (4 fixed buckets:
+  under 15 min / 15 min–4 hr / 4 hr–1 day / 1 day+, computed from `exit_time - entry_time`, no
+  new column), an Advanced disclosure for a date range, and Clear. A day matches if **any** of
+  its trades satisfies **all** active trade-based filters together — a day isn't excluded just
+  because one of several trades doesn't match while another does.
+- **Per-day cards** (`day-list-card.tsx`): a mini cumulative-P&L sparkline (Recharts, no axes)
+  and a stat grid — total trades, total volume (`entry_price × size`, *not* a raw `size` sum,
+  which would be meaningless across different symbols/instruments), win rate, MFE/MAE ratio
+  (`Σ|MFE| / Σ|MAE|` over trades that logged both — a ratio, so no currency-scoping concern,
+  unlike every other figure on the card), commissions/fees, net P&L. Most recent day open by
+  default, the rest collapsed.
+- **"Insert template"** on the entry form (`journal-entry-form.tsx`): three canned skeletons
+  (Pre-market plan, Post-session review, Loss review) as static constants, each targeting its
+  own specific field rather than one generic note box — this journal already splits
+  plan/review/lessons apart, unlike the single-textarea layout the reference screenshot showed.
+  No new templates table; user-authored templates can come later if actually wanted.
+- **Right rail**: `journal-notes-rail.tsx` (reverse-chronological list of entries that have
+  content, "Create note" linking to today) and `tag-cloud.tsx` (`mostCommonTags`, reusing the
+  same trade tags the filter bar's Tags popover sources from).
+- **`listAllClosedTradesForJournal`** (`journal/queries.ts`) — every closed trade at once,
+  same "no pagination, deliberate" reasoning `listAllJournalEntries` already documents, so the
+  List view can filter and re-group client-side without a round trip per filter change.
+
+### Fixed
+- **A real mobile layout bug, caught by DOM measurement, not by eyeballing a screenshot.** The
+  per-day stat grid's `grid-cols-2` cells at 375px genuinely overlapped in the DOM — confirmed
+  via `getBoundingClientRect()`, where the "Commissions/fees" and "Net P&L" value spans'
+  x-ranges actually intersected. Root cause: a flex child's default `min-width` is its content
+  size, not 0, so a long label ("Commissions/fees") pushed its grid cell wider than its
+  `1fr` track and into the sibling column, instead of wrapping. Fixed with `min-w-0` +
+  `truncate` on the flex row, plus making the stat grid `grid-cols-1 sm:grid-cols-2` — a
+  first-pass single-`min-w-0`-only fix stopped the overlap but truncated labels down to
+  unreadable fragments ("Com...", "N...") on narrow screens, so the single-column mobile
+  layout was the actual fix, not just a contrast tweak.
+
+### Verified live
+`npx tsc --noEmit` clean, `npm run lint` clean, `npm run test:rls` and `npm run test:prop`
+unaffected at 101/101 and 134/134 (no schema touched). Seeded 4 real tagged trades across 3
+days plus 2 journal entries via direct SQL and hand-verified every stat on screen against the
+seed data: total volume $235,000.00 (2350 × 100, XAUUSD), $21,650.00 (1.0800×10000 +
+1.0850×10000, the two-EURUSD day), win rates, MFE/MAE ratios (75/55 = 1.36), commissions, and
+tag frequencies (breakout·2, london-session·2) — all matched by hand before trusting the UI.
+Confirmed the Tags filter narrows the list to exactly the one day carrying the selected tag.
+Confirmed "Insert template" via the textareas' actual `.value` (not just visual inspection)
+lands in the correct field only. Confirmed the overlap bug's root cause and its fix the same
+way — `getBoundingClientRect()` on the actual spans, both before and after — after this
+session's screenshot tool proved unreliable following any scroll, a limitation flagged in
+M9b's entry too.
+
 ## [0.32.0] — 2026-09-03
 
 ### Added — M9b: dashboard parity pass

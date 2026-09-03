@@ -81,3 +81,84 @@ export async function listTradesClosedOnDate(entryDate: string): Promise<ClosedT
     };
   });
 }
+
+export type JournalTradeRow = {
+  id: number;
+  symbol: string;
+  direction: "long" | "short";
+  pnl: number;
+  size: number;
+  entry_price: number;
+  entry_time: string;
+  exit_time: string;
+  close_day: string;
+  mae_amount: number | null;
+  mfe_amount: number | null;
+  commission: number;
+  swap: number;
+  fees: number;
+  tags: string[];
+  account_currency: string;
+};
+
+/**
+ * Every closed trade the user has, across every account — fetched whole,
+ * same "no pagination, deliberate" reasoning listAllJournalEntries already
+ * documents. The List view groups these by close_day client-side (see
+ * day-stats.ts), which needs the full set at once to filter and re-group
+ * reactively without a round trip per filter change.
+ */
+export async function listAllClosedTradesForJournal(): Promise<JournalTradeRow[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("trades")
+    .select(
+      "id, symbol, direction, pnl, size, entry_price, entry_time, exit_time, close_day, mae_amount, mfe_amount, commission, swap, fees, tags, accounts(currency)",
+    )
+    .not("close_day", "is", null)
+    .order("exit_time", { ascending: true });
+
+  if (error) {
+    console.error("[journal] listAllClosedTradesForJournal failed", error);
+    return [];
+  }
+
+  return (data ?? []).map((row) => {
+    const r = row as unknown as {
+      id: number;
+      symbol: string;
+      direction: "long" | "short";
+      pnl: number;
+      size: number;
+      entry_price: number;
+      entry_time: string;
+      exit_time: string;
+      close_day: string;
+      mae_amount: number | null;
+      mfe_amount: number | null;
+      commission: number;
+      swap: number;
+      fees: number;
+      tags: string[];
+      accounts: { currency: string } | null;
+    };
+    return {
+      id: r.id,
+      symbol: r.symbol,
+      direction: r.direction,
+      pnl: r.pnl,
+      size: r.size,
+      entry_price: r.entry_price,
+      entry_time: r.entry_time,
+      exit_time: r.exit_time,
+      close_day: r.close_day,
+      mae_amount: r.mae_amount,
+      mfe_amount: r.mfe_amount,
+      commission: r.commission,
+      swap: r.swap,
+      fees: r.fees,
+      tags: r.tags,
+      account_currency: r.accounts?.currency ?? "USD",
+    };
+  });
+}
