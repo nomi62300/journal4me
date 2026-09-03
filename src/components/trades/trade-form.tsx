@@ -49,6 +49,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { CriteriaChecklist } from "@/components/strategies/criteria-checklist";
 import { TagInput } from "@/components/trades/tag-input";
 import { createTrade, updateTrade } from "@/lib/trades/actions";
 import { SETUP_GRADE_VALUES } from "@/lib/trades/schema";
@@ -58,7 +59,7 @@ import type { Trade } from "@/lib/trades/types";
 import { cn } from "@/lib/utils";
 
 type PickerAccount = { id: number; name: string; account_type: string };
-type PickerStrategy = { id: number; name: string };
+type PickerStrategy = { id: number; name: string; entry_criteria: string[] };
 
 /** "2026-08-07T14:00:00+05:00" -> "2026-08-07T14:00" for a datetime-local input. */
 function toLocalInputValue(iso: string | null): string {
@@ -109,6 +110,16 @@ export function TradeForm({
   const [strategyId, setStrategyId] = useState(
     trade?.strategy_id ? String(trade.strategy_id) : "",
   );
+  const [criteriaMet, setCriteriaMet] = useState<string[]>(trade?.criteria_met ?? []);
+  const selectedStrategy = strategies.find((s) => String(s.id) === strategyId);
+
+  // Switching to a different strategy (or clearing it) invalidates the old
+  // checklist selections — they're a snapshot against ITS criteria, not a
+  // generic set of checked strings that happens to survive a strategy swap.
+  function handleStrategyChange(value: string) {
+    setStrategyId(value);
+    setCriteriaMet([]);
+  }
   const [symbol, setSymbol] = useState(trade?.symbol ?? "");
   const [assetClass, setAssetClass] = useState(trade?.asset_class ?? "");
   const [direction, setDirection] = useState<"long" | "short">(trade?.direction ?? "long");
@@ -173,6 +184,7 @@ export function TradeForm({
         const fd = new FormData();
         fd.set("account_id", accountId);
         fd.set("strategy_id", strategyId);
+        for (const c of criteriaMet) fd.append("criteria_met", c);
         fd.set("symbol", symbol);
         fd.set("asset_class", assetClass);
         fd.set("direction", direction);
@@ -229,7 +241,7 @@ export function TradeForm({
             <FieldLabel htmlFor="t-strategy">
               Strategy <span className="text-muted-foreground font-normal">(optional)</span>
             </FieldLabel>
-            <Select value={strategyId} onValueChange={setStrategyId} disabled={pending}>
+            <Select value={strategyId} onValueChange={handleStrategyChange} disabled={pending}>
               <SelectTrigger id="t-strategy" className="w-full">
                 <SelectValue placeholder="No strategy" />
               </SelectTrigger>
@@ -243,6 +255,21 @@ export function TradeForm({
             </Select>
           </Field>
         </div>
+
+        {selectedStrategy && selectedStrategy.entry_criteria.length > 0 ? (
+          <Field>
+            <FieldLabel>Entry criteria met</FieldLabel>
+            <CriteriaChecklist
+              criteria={selectedStrategy.entry_criteria}
+              value={criteriaMet}
+              onChange={setCriteriaMet}
+              disabled={pending}
+            />
+            <FieldDescription>
+              Which of {selectedStrategy.name}&apos;s checklist did this trade actually follow?
+            </FieldDescription>
+          </Field>
+        ) : null}
 
         <div className="grid grid-cols-[2fr_1fr] gap-4">
           <Field data-invalid={!!state.fieldErrors?.symbol}>

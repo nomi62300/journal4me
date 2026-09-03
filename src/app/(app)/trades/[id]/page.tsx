@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { ArrowLeft } from "lucide-react";
 
+import { CriteriaChecklist } from "@/components/strategies/criteria-checklist";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -59,6 +60,10 @@ export default async function TradeDetailPage({
     ...s,
     url: urls[s.storage_path] ?? null,
   }));
+  // Only resolves if the strategy is still active — listStrategiesForPicker
+  // filters archived ones out, same pre-existing limitation the Select
+  // already had for showing the strategy's name at all.
+  const tradeStrategy = strategies.find((s) => s.id === trade.strategy_id);
 
   return (
     <div className="mx-auto max-w-2xl p-4 md:p-6">
@@ -164,6 +169,17 @@ export default async function TradeDetailPage({
                   {tag}
                 </Badge>
               ))}
+            </div>
+          ) : null}
+
+          {tradeStrategy && tradeStrategy.entry_criteria.length > 0 ? (
+            <div className="space-y-1.5">
+              <p className="text-muted-foreground text-xs font-medium">
+                Entry criteria —{" "}
+                {tradeStrategy.entry_criteria.filter((c) => trade.criteria_met.includes(c)).length} of{" "}
+                {tradeStrategy.entry_criteria.length} met
+              </p>
+              <CriteriaChecklist criteria={tradeStrategy.entry_criteria} value={trade.criteria_met} />
             </div>
           ) : null}
 

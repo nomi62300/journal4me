@@ -49,6 +49,10 @@ export type Trade = {
   close_day: string | null;
 
   tags: string[];
+  /** Snapshot of which of the strategy's entry_criteria (at the time this
+   *  trade was scored) were actually followed. Empty unless strategy_id is
+   *  set — see the DB CHECK constraint of the same name. */
+  criteria_met: string[];
   setup_grade: SetupGrade | null;
   mood_entry: string | null;
   mood_exit: string | null;

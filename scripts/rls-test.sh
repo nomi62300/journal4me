@@ -148,6 +148,12 @@ expect_ok   "A creates a strategy with a checklist" "$A" "insert into public.str
 expect_eq   "B sees none of A's strategies"          "$B" "select count(*) from public.strategies;" "0"
 A_STRAT=$(as_owner "select id from public.strategies where user_id='$A' limit 1;" | tr -d ' \n\r')
 expect_ok   "A tags its own trade with its own strategy" "$A" "insert into public.trades (user_id,account_id,strategy_id,symbol,direction,entry_price,size,entry_time) values ('$A',$A_ACCT2,$A_STRAT,'STRAT','long',100,1,now());"
+# M8b: a checklist with nothing to check it against is meaningless data
+# (trades_criteria_met_needs_strategy) — a criterion recorded with no
+# strategy_id at all must be rejected, same reasoning as the paired
+# loss-limit type/value columns elsewhere in this schema.
+expect_deny "criteria_met with NO strategy_id is rejected" "$A" "insert into public.trades (user_id,account_id,symbol,direction,entry_price,size,entry_time,criteria_met) values ('$A',$A_ACCT2,'NOSTRAT','long',100,1,now(),array['made up criterion']);"
+expect_ok   "criteria_met alongside a real strategy_id is fine" "$A" "insert into public.trades (user_id,account_id,strategy_id,symbol,direction,entry_price,size,entry_time,criteria_met) values ('$A',$A_ACCT2,$A_STRAT,'WITHCRIT','long',100,1,now(),array['HTF trend aligned']);"
 # The real attack: B holds A's REAL strategy id (fetched as the DB owner, since
 # B cannot read it under RLS) and tries to tag its OWN trade with it. A test
 # where B looks up the id itself would silently attempt 0 rows and prove
@@ -162,7 +168,7 @@ echo "==> Monthly trade quota (free = 30)"
 # exact rather than "enough to be over": the statement-level trigger added
 # below now correctly REJECTS a bulk insert that overshoots the cap in one
 # statement, so this must land AT the boundary, not past it.
-expect_ok   "A fills up to the 30-trade cap (2 existing + 28 more)" "$A" "insert into public.trades (user_id,account_id,symbol,direction,entry_price,size,entry_time) select '$A',$A_ACCT2,'F'||g,'long',100,1,now() from generate_series(1,28) g;"
+expect_ok   "A fills up to the 30-trade cap (3 existing + 27 more)" "$A" "insert into public.trades (user_id,account_id,symbol,direction,entry_price,size,entry_time) select '$A',$A_ACCT2,'F'||g,'long',100,1,now() from generate_series(1,27) g;"
 expect_deny "the 31st trade is blocked"               "$A" "insert into public.trades (user_id,account_id,symbol,direction,entry_price,size,entry_time) values ('$A',$A_ACCT2,'OVER','long',100,1,now());"
 expect_ok   "editing an existing trade still works at the cap" "$A" "update public.trades set notes='fixed' where symbol='ES';"
 

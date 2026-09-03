@@ -27,6 +27,10 @@ function parseTradeForm(formData: FormData) {
     .getAll("tags")
     .map((t) => String(t).trim())
     .filter(Boolean);
+  const criteriaMet = formData
+    .getAll("criteria_met")
+    .map((c) => String(c).trim())
+    .filter(Boolean);
 
   return tradeSchema.safeParse({
     account_id: formData.get("account_id"),
@@ -49,6 +53,7 @@ function parseTradeForm(formData: FormData) {
     mae_amount: formData.get("mae_amount") ?? "",
     mfe_amount: formData.get("mfe_amount") ?? "",
     tags,
+    criteria_met: criteriaMet,
     setup_grade: formData.get("setup_grade") ?? "",
     mood_entry: formData.get("mood_entry") ?? "",
     mood_exit: formData.get("mood_exit") ?? "",
@@ -86,6 +91,9 @@ function friendlyDbError(message: string): string {
   }
   if (message.includes("trades_exit_after_entry")) {
     return "Exit can't be before entry.";
+  }
+  if (message.includes("trades_criteria_met_needs_strategy")) {
+    return "Criteria can only be checked when a strategy is selected.";
   }
   if (message.includes("not found or not yours")) {
     return "That account isn't available.";
@@ -138,6 +146,7 @@ export async function createTrade(
       mae_amount: d.mae_amount === "" ? null : d.mae_amount,
       mfe_amount: d.mfe_amount === "" ? null : d.mfe_amount,
       tags: d.tags,
+      criteria_met: d.criteria_met,
       setup_grade: d.setup_grade === "" ? null : d.setup_grade,
       mood_entry: emptyToNull(d.mood_entry ?? ""),
       mood_exit: emptyToNull(d.mood_exit ?? ""),
@@ -197,6 +206,7 @@ export async function updateTrade(
       mae_amount: d.mae_amount === "" ? null : d.mae_amount,
       mfe_amount: d.mfe_amount === "" ? null : d.mfe_amount,
       tags: d.tags,
+      criteria_met: d.criteria_met,
       setup_grade: d.setup_grade === "" ? null : d.setup_grade,
       mood_entry: emptyToNull(d.mood_entry ?? ""),
       mood_exit: emptyToNull(d.mood_exit ?? ""),

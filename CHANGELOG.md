@@ -4,6 +4,59 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.0] — 2026-09-03
+
+### Added — M8b: strategies, and the payoff of their checklist
+- **`/strategies`** — CRUD (create/edit/archive/delete) on top of M2's already-granted
+  `strategies` schema, plus per-strategy analytics reusing M5's metric layer directly rather
+  than re-deriving win rate/expectancy/R here.
+- **`trades.criteria_met text[]`** (new migration): a per-trade snapshot of which of the
+  strategy's `entry_criteria` were actually followed — the feature that turns a strategy from
+  a text field into a report, per the build plan's own framing: *"my A+ setups make money, my
+  rule-breaks lose money" becomes a report instead of a feeling*. A snapshot, not a live
+  re-derivation against the strategy's current criteria list — editing the checklist later
+  must not rewrite what was true of a trade at the time, same reasoning `breach_events.snapshot`
+  already uses. Guarded by `trades_criteria_met_needs_strategy`: a checklist with nothing to
+  check it against is meaningless data, not a permissive default.
+- **A real money-computation bug caught before it shipped, not after**: a strategy is not
+  account-scoped, so its trades can span currencies — the first draft of the analytics summed
+  `pnl` across all of a strategy's trades regardless of currency, exactly the confidently-wrong
+  mixed-currency number this codebase avoids everywhere else. Fixed by splitting every metric
+  into two groups: ratio-safe (win rate, expectancy-in-R — counts and unit-normalized values,
+  safe across any currency mix) computed over every trade, and sum-safe (net P&L, profit
+  factor, MAE/MFE) computed only over the strategy's primary currency, with the excluded count
+  stated on screen — same "group by currency, never sum across it" rule the dashboard already
+  applies, now extended to a second surface that turned out to need it.
+- The "followed the checklist vs. didn't" comparison — the actual payoff — splits every closed
+  trade by whether *all* criteria were checked off and shows win rate and expectancy for each
+  bucket side by side. Deliberately win-rate/expectancy only, never net P&L, since that
+  comparison must stay valid across the same currency-mixing risk.
+- `CriteriaChecklist` is one component in two modes: interactive toggle chips in the trade
+  form (reusing the existing `TagInput` for authoring a strategy's own criteria list), and
+  read-only chips with a "3 of 5 met" count on the trade detail page — not a near-duplicate
+  "criteria badges" component for the read-only case.
+
+### Verified live, full loop
+Created a strategy with a 3-item checklist, logged one trade meeting 2 of 3 criteria (a win)
+and one meeting all 3 (a loss), and confirmed: the checklist round-trips correctly on the trade
+detail page ("2 of 3 met", with the right two shown as met); the strategy's KPIs compute
+correctly by hand (net P&L $30.00, win rate 50%, profit factor 1.60, expectancy 0.30R); and the
+followed/didn't-follow comparison correctly shows the (small-sample, honestly non-flattering)
+result — the trade that skipped a criterion won, the one that followed everything lost — proving
+the pipeline reports what's actually true rather than what would look good. Archive/unarchive
+verified live; checked at mobile width.
+
+A rapid-fire double-`.click()` in the same script tick appeared to drop one of two checklist
+toggles — traced to the test script, not the product (two genuinely separate user clicks,
+each a separate browser event, re-render fine between them; only synchronous same-tick
+scripted clicks race on the closure-captured state, which no real user interaction can do).
+Confirmed correct with realistic timing between clicks before moving on.
+
+`npm run test:rls` gained 2 assertions for `trades_criteria_met_needs_strategy` (96/96 — the
+suite's own hardcoded "2 existing + 28 more = 30-trade cap" arithmetic needed adjusting to
+account for one new trade the added tests legitimately create earlier in the script).
+`npm run test:prop` unaffected at 134/134.
+
 ## [0.28.0] — 2026-09-03
 
 ### Added — M8a: the journal

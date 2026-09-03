@@ -119,11 +119,13 @@ export async function listAccountsForPicker(): Promise<
   return data ?? [];
 }
 
-export async function listStrategiesForPicker(): Promise<{ id: number; name: string }[]> {
+export async function listStrategiesForPicker(): Promise<
+  { id: number; name: string; entry_criteria: string[] }[]
+> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("strategies")
-    .select("id, name")
+    .select("id, name, entry_criteria")
     .eq("is_archived", false)
     .order("name");
 

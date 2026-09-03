@@ -58,6 +58,7 @@ export const tradeSchema = z
     mfe_amount: z.coerce.number().min(0, "MFE is a gain — enter 0 or a positive number.").optional().or(z.literal("")),
 
     tags: z.array(z.string().trim().min(1)).default([]),
+    criteria_met: z.array(z.string().trim().min(1)).default([]),
     setup_grade: z.enum(SETUP_GRADE_VALUES).optional().or(z.literal("")),
     mood_entry: z.string().trim().max(40).optional().or(z.literal("")),
     mood_exit: z.string().trim().max(40).optional().or(z.literal("")),
@@ -104,6 +105,19 @@ export const tradeSchema = z
       ) {
         ctx.addIssue({ code: "custom", path: ["exit_time"], message: "Exit can't be before entry." });
       }
+    }
+
+    // Mirrors trades_criteria_met_needs_strategy: a checklist with nothing
+    // to check it against is meaningless data. The form already clears
+    // criteria_met whenever the strategy changes (see trade-form.tsx's
+    // handleStrategyChange), so this should be unreachable via the UI — kept
+    // here anyway since the database is the real boundary, not this form.
+    if (data.criteria_met.length > 0 && (data.strategy_id === "" || data.strategy_id === undefined)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["criteria_met"],
+        message: "Criteria can only be checked when a strategy is selected.",
+      });
     }
   });
 
