@@ -245,6 +245,29 @@ expect_deny "relabelling prop_firm -> personal to launder capacity is rejected" 
 expect_ok   "an ordinary rename (no cap change) still works"  "$E" "update public.accounts set name='P1 renamed' where user_id='$E' and name='P1';"
 
 echo
+echo "==> push_subscriptions (M7b)"
+F=$(mk_user "rls_f_$(date +%s)@journal4me.test")
+expect_ok   "F subscribes device 1"                     "$F" "select public.save_push_subscription('https://push.example/f1','p256dh-f1','auth-f1','Chrome/1');"
+expect_eq   "F sees exactly 1 subscription"              "$F" "select count(*) from public.push_subscriptions where user_id='$F';" "1"
+expect_ok   "F subscribes device 2 (a second device)"    "$F" "select public.save_push_subscription('https://push.example/f2','p256dh-f2','auth-f2','Safari/1');"
+expect_eq   "F now has 2 — one row per device, not one per user" "$F" "select count(*) from public.push_subscriptions where user_id='$F';" "2"
+expect_ok   "re-subscribing device 1 upserts, not duplicates" "$F" "select public.save_push_subscription('https://push.example/f1','p256dh-f1-NEW','auth-f1','Chrome/2');"
+expect_eq   "still 2 rows, not 3"                         "$F" "select count(*) from public.push_subscriptions where user_id='$F';" "2"
+expect_eq   "...and the upsert really updated the keys"   "$F" "select p256dh from public.push_subscriptions where endpoint='https://push.example/f1';" "p256dh-f1-NEW"
+expect_eq   "B sees NONE of F's subscriptions"            "$B" "select count(*) from public.push_subscriptions;" "0"
+expect_deny "B cannot insert a subscription owned by F"   "$B" "insert into public.push_subscriptions (user_id,endpoint,p256dh,auth_key) values ('$F','https://push.example/stolen','x','y');"
+expect_eq   "B's DELETE against F's subscriptions hits 0" "$B" "with d as (delete from public.push_subscriptions where user_id='$F' returning 1) select count(*) from d;" "0"
+# The shared-device case the update policy exists for: G re-subscribes the
+# EXACT SAME endpoint F already registered (e.g. F signed out on a shared
+# laptop and G signed in). The row must reassign to G, not stay F's forever.
+G=$(mk_user "rls_g_$(date +%s)@journal4me.test")
+expect_ok   "G re-subscribes F's exact endpoint (shared device)" "$G" "select public.save_push_subscription('https://push.example/f1','p256dh-g','auth-g','Chrome/3');"
+expect_eq   "that row now belongs to G, not F"            "$G" "select user_id::text from public.push_subscriptions where endpoint='https://push.example/f1';" "$G"
+expect_eq   "F is left with only device 2"                "$F" "select count(*) from public.push_subscriptions where user_id='$F';" "1"
+expect_deny "G cannot hand its OWN row to a third user via a raw UPDATE" "$G" "update public.push_subscriptions set user_id='$B' where endpoint='https://push.example/f1';"
+expect_eq   "...the row is still G's after the attempt"   "$G" "select user_id::text from public.push_subscriptions where endpoint='https://push.example/f1';" "$G"
+
+echo
 echo "==> Reference data"
 expect_eq   "plans readable by a signed-in user"   "$A" "select count(*) from public.plans;" "2"
 expect_eq   "subscriptions table readable, empty"  "$A" "select count(*) from public.subscriptions;" "0"

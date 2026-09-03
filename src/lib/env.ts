@@ -36,3 +36,13 @@ export const SUPABASE_PUBLISHABLE_KEY = required(
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
   "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
 );
+
+/**
+ * VAPID public key, used client-side as pushManager.subscribe()'s
+ * applicationServerKey. The private counterpart lives only in
+ * src/lib/push/config.ts, a server-only module never imported here.
+ */
+export const VAPID_PUBLIC_KEY = required(
+  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
+  "NEXT_PUBLIC_VAPID_PUBLIC_KEY",
+);

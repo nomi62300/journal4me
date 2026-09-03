@@ -4,6 +4,58 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] — 2026-09-03
+
+### Added — M7b: push subscriptions and "Enable alerts"
+- `push_subscriptions` — one row per user per **device**, not per user: a trader with a phone
+  and a laptop both subscribed must get an alert on both. Keyed by the browser's own
+  subscription `endpoint`, which the Push API guarantees is globally unique, so it's the
+  natural upsert target.
+- **`public.save_push_subscription()` is `SECURITY DEFINER`, and the reason is a real,
+  verified Postgres behavior, not a style choice.** The shared-device case — user A subscribes
+  a browser, signs out, user B signs in on the same browser and subscribes again — needs to
+  reassign a row RLS would otherwise hide from B entirely. A plain `UPDATE ... USING (true)`
+  policy was tried first and **does not work**: confirmed live that Postgres AND-combines a
+  table's `SELECT` policy with `UPDATE`'s own `USING` clause when locating the row to update,
+  so a caller who cannot `SELECT` another user's row can never reach it via `UPDATE` either —
+  the statement just silently matches zero rows, no error. Fixed with the same narrow
+  `SECURITY DEFINER`-function pattern already used elsewhere in this schema
+  (`assert_profile_editable`, the `daily_summaries` reaggregation functions): safe here
+  specifically because `user_id` is always `(select auth.uid())`, never a parameter, so a
+  caller can reassign a row's ownership only to *themselves*.
+- **`/notifications`** — "Enable alerts", with the iOS handling the build plan calls out as the
+  part that must not be gotten wrong: since iOS 16.4, Safari delivers push only to a Home
+  Screen install, and a permission prompt from a plain tab is silently ignored rather than
+  denied. `'PushManager' in window` can't tell the difference (it exists in the tab too), so
+  the component explicitly checks standalone-launch state and shows step-by-step
+  Add-to-Home-Screen instructions instead of a button that would quietly do nothing.
+  `Notification.requestPermission()` is called synchronously from the click handler, which iOS
+  requires.
+- A device list with per-device removal, and a "Send test" button — a real, permanent feature
+  (not a throwaway), since proving alerts actually arrive is the whole point of this page.
+- `src/lib/push/send.ts` wraps `web-push`, shared now by "Send test" and reused as-is by
+  M7c's trigger-driven fan-out later, so there is one implementation of "how to address and
+  encrypt a message," not two. VAPID vars live in a new server-only `push/config.ts`,
+  deliberately separate from the shared `env.ts` (which ships in the client bundle via
+  `supabase/client.ts` — a bare, non-`NEXT_PUBLIC_` var read there would resolve to `undefined`
+  in the browser and break every client page on load).
+
+### Verified
+- `npm run test:rls` gained 14 assertions for `push_subscriptions`: one-row-per-device, upsert
+  on re-subscribe (not duplication), cross-tenant isolation, and specifically the shared-device
+  reassignment (device row moves from F to G) plus the negative case (G cannot hand its own row
+  to a third user). 87/87 total, `test:prop` unaffected at 128/128.
+- The send pipeline was verified against a **real push service**: `sendPushToSubscription()`
+  correctly VAPID-signs and sends to a real FCM endpoint (a bad key would fail authentication,
+  not reach the subscription-lookup stage), and correctly classifies the resulting 410 as
+  "remove this subscription."
+- **What could not be verified here, stated rather than assumed working:** this automated
+  browser environment reports `Notification.permission` as `"denied"` by sandbox default with
+  no page-level API to change it, so the actual "click Enable → OS grants permission → browser
+  creates a subscription → a push arrives and shows a system notification" happy path was not
+  exercised end-to-end. The "denied" state itself rendered correctly live. The full happy path
+  needs a real browser (or a physical device for the iOS install path) to confirm.
+
 ## [0.25.0] — 2026-09-03
 
 ### Added — M7a: the PWA foundation (a real gap found, not in the plan)
