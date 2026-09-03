@@ -41,6 +41,9 @@ export async function subscribeToPush(input: {
 
   if (error) {
     console.error("[push] subscribeToPush failed", error);
+    if (error.message.includes("Plan does not include push notifications")) {
+      return { error: "Push notifications are a Pro feature. Upgrade to turn them on." };
+    }
     return { error: "Couldn't save that subscription. Try again." };
   }
 

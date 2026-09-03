@@ -20,6 +20,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { UpgradePrompt } from "@/components/billing/upgrade-prompt";
 import {
   sendTestPush,
   subscribeToPush,
@@ -61,7 +62,13 @@ function urlBase64ToUint8Array(base64url: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
-export function PushSettings({ devices }: { devices: PushSubscriptionRow[] }) {
+export function PushSettings({
+  devices,
+  pushAllowed,
+}: {
+  devices: PushSubscriptionRow[];
+  pushAllowed: boolean;
+}) {
   const [support, setSupport] = useState<Support>("checking");
   const [permission, setPermission] = useState<NotificationPermission | null>(null);
   const [subscribedHere, setSubscribedHere] = useState(false);
@@ -209,7 +216,12 @@ export function PushSettings({ devices }: { devices: PushSubscriptionRow[] }) {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {support === "checking" ? null : support === "unsupported" ? (
+          {!pushAllowed ? (
+            <UpgradePrompt
+              title="Push alerts are a Pro feature"
+              description="Every alert still lands in the notification list above — upgrade to also get it as a push notification on your device."
+            />
+          ) : support === "checking" ? null : support === "unsupported" ? (
             <Alert>
               <BellOff className="size-4" />
               <AlertTitle>Not supported in this browser</AlertTitle>

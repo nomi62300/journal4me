@@ -29,5 +29,5 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/strategies", label: "Strategies", icon: Target },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/notifications", label: "Notifications", icon: Bell },
-  { href: "/settings", label: "Settings", icon: Settings, mobile: true, comingSoon: true },
+  { href: "/settings", label: "Settings", icon: Settings, mobile: true },
 ];

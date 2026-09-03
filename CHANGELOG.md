@@ -4,6 +4,80 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.0] — 2026-09-03
+
+### Added — M8c: the commercial surface
+- **A real enforcement gap closed, found while building the UI meant to sit on top of it.**
+  `plan_allows()` has existed since the billing migration (`20260902044659`) with
+  `csv_import: false` / `push_notifications: false` seeded on the free tier — but nothing
+  anywhere ever called it. A free-tier user could import CSVs and register unlimited push
+  subscriptions with zero restriction; only the numeric limits (`max_*_accounts`,
+  `max_trades_per_month`) were ever actually checked. Building a paywall UI on top of that
+  would have been decorative — the exact failure mode `AGENTS.md` calls out for RLS/grants,
+  just one level up (a feature *flag* instead of a table grant). Fixed in a new migration
+  (`20260903180000`): `trades_insert_own`'s `WITH CHECK` now also requires
+  `source <> 'csv_import' OR plan_allows(..., 'csv_import')` (row-level, not statement-level —
+  `plan_allows()` doesn't depend on the statement's own new rows, so the count-based
+  multi-row-bypass class of bug doesn't apply here); `save_push_subscription()` — SECURITY
+  DEFINER and therefore outside RLS entirely by design — now raises inside its own body
+  instead, the only place a check on that path can live.
+- **A regression this fix caused, and caught, before it shipped**: rebuilding
+  `trades_insert_own` from the *original* `trades.sql` draft (rather than the version actually
+  live, which a later migration had extended with a `strategy_id` ownership check) silently
+  dropped that check. Caught by the existing RLS suite itself — "B cannot tag its trade with
+  A's strategy_id" failed — not by inspection. Fixed by rebuilding the policy from the live
+  version instead of the historical one, with a comment now warning against the same mistake.
+- **`/settings`** — was `comingSoon` in the nav since M0; now a real page with a Plan & usage
+  card: current plan, active-account and monthly-trade usage against the plan's limits (reusing
+  M2's `PlanLimit`/`getAccountLimits`), and CSV import / push notifications shown as
+  included-or-not, with an upgrade link to `/pricing` for free-tier users.
+- **CSV import and push alerts now show an upgrade prompt instead of failing at the database**:
+  `/trades/import` checks `plan_allows('csv_import')` server-side and renders `UpgradePrompt` in
+  place of the wizard when the plan doesn't include it; `PushSettings` does the same for
+  `push_notifications`, gated ahead of the browser-support detection so a free user never even
+  reaches the "enable" button. The in-app notification centre stays ungated either way — per
+  the original M7 design, push is a delivery channel, not the alert itself.
+- **`(marketing)/`** — the landing page (`/`, replacing the placeholder redirect-only
+  `src/app/page.tsx` from M0) and `/pricing`, both public and reading `plans` directly (the
+  `plans_select_all` policy already allows `anon`). Pricing renders every `plans.limits` key in
+  a fixed order so the two tiers line up row-for-row, rather than iterating the jsonb object in
+  whatever key order it happens to serialize in. Copy is grounded in what M2–M8b actually ship
+  (trailing/static drawdown as data, consistency cure amounts, the calendar heatmap, the
+  entry-criteria checklist payoff) and leads with the honesty design from the build plan's §7 —
+  *exact / estimated / unknown* confidence — as the actual differentiator, not generic SaaS copy.
+  Pro's price is deliberately **not** rendered as a dollar figure: `price_cents` is a real `$0`
+  wired to a real behavior for the free tier, but a placeholder on every paid plan until Stripe
+  is wired (per the billing migration's own comment) — showing it as a live price to a visitor
+  would be a wrong number, not a placeholder. Shows "Coming soon" instead, driven by the same
+  `price_cents <= 0` check, so a real Stripe price starts rendering with no further code change.
+- Signed-in visitors to `/` and `/pricing` see "Dashboard" / "Go to dashboard" instead of
+  sign-up CTAs.
+
+### Fixed
+- Mobile header overflow on the new marketing pages: at 375px, "Pricing" + "Sign in" +
+  "Get started free" didn't fit the header and clipped off-screen. Fixed by hiding the
+  redundant `Pricing` link on `sm:`-and-below (still reachable from the footer) and shortening
+  the CTA to "Get started" below `sm:`. Caught live during the mobile verification pass, not
+  assumed away.
+
+### Verified live
+`npx tsc --noEmit` clean, `npm run lint` clean (only the pre-existing unrelated
+`account-wizard.tsx` warning). `npm run test:rls` **96 → 101/101**: 2 new assertions for the
+`csv_import` gate (a fresh free-tier user denied, the identical insert as `source='manual'`
+allowed as a control) and 2 for the `push_notifications` gate (denied, and no row created);
+the pre-existing push-subscription mechanics block (`F`/`G`, shared-device reassignment) now
+puts those users on Pro first, since it tests reassignment, not entitlements, and would
+otherwise fail for the newly-real reason instead of testing what it was designed to test.
+`npm run test:prop` unaffected at 134/134. Also hand-verified outside the test harness: a
+Pro-tier user (inserted directly, no UI) *can* still csv_import-insert a trade — the fix
+denies free tier specifically, not everyone. End-to-end in the browser: signed up a fresh
+user, confirmed `/settings` shows 0/1 personal, 0/1 prop, 0/30 trades and both features
+"Not on your plan"; `/trades/import` and the push card on `/notifications` both show
+`UpgradePrompt` with a working link to `/pricing`; created an account directly in Postgres and
+confirmed the usage bar moved to 1/1; checked the landing page and pricing page signed out, at
+both desktop and 375px mobile widths, including the CTA-routing round trip
+(Upgrade → `/pricing` → Get started free/Go to dashboard reflecting sign-in state correctly).
+
 ## [0.29.0] — 2026-09-03
 
 ### Added — M8b: strategies, and the payoff of their checklist

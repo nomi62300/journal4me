@@ -2,14 +2,16 @@ import type { Metadata } from "next";
 
 import { NotificationList } from "@/components/push/notification-list";
 import { PushSettings } from "@/components/push/push-settings";
+import { planAllows } from "@/lib/billing/queries";
 import { listNotifications, listPushSubscriptions } from "@/lib/push/queries";
 
 export const metadata: Metadata = { title: "Notifications" };
 
 export default async function NotificationsPage() {
-  const [notifications, devices] = await Promise.all([
+  const [notifications, devices, pushAllowed] = await Promise.all([
     listNotifications(),
     listPushSubscriptions(),
+    planAllows("push_notifications"),
   ]);
 
   return (
@@ -23,7 +25,7 @@ export default async function NotificationsPage() {
 
       <div className="flex flex-col gap-4">
         <NotificationList notifications={notifications} />
-        <PushSettings devices={devices} />
+        <PushSettings devices={devices} pushAllowed={pushAllowed} />
       </div>
     </div>
   );

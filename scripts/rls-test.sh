@@ -53,7 +53,7 @@ expect_deny() {
   out=$(as_user "$u" "$s" 2>&1)
   if [[ $? -eq 0 ]]; then
     bad "$d (expected denial, but it SUCCEEDED)"
-  elif grep -qiE 'row-level security|permission denied|violates row-level|Unknown timezone|violates check constraint|duplicate key value|not found or not yours|Plan limit exceeded' <<<"$out"; then
+  elif grep -qiE 'row-level security|permission denied|violates row-level|Unknown timezone|violates check constraint|duplicate key value|not found or not yours|Plan limit exceeded|Plan does not include' <<<"$out"; then
     ok "$d"
   else
     bad "$d (blocked, but by the WRONG error: $(grep -m1 ERROR <<<"$out"))"
@@ -173,6 +173,18 @@ expect_deny "the 31st trade is blocked"               "$A" "insert into public.t
 expect_ok   "editing an existing trade still works at the cap" "$A" "update public.trades set notes='fixed' where symbol='ES';"
 
 echo
+echo "==> csv_import plan flag (M8c)"
+# Fresh user, well under the trade-quota cap, so a denial here can only be
+# the csv_import gate and not incidentally the monthly quota. Confirms the
+# fix in 20260903180000: source='csv_import' was previously uncheckable —
+# plan_allows() existed since the billing migration but nothing called it.
+I=$(mk_user "rls_i_$(date +%s)@journal4me.test")
+expect_ok   "I opens a personal account"    "$I" "insert into public.accounts (user_id,name,account_type,starting_balance) values ('$I','I Personal','personal',1000);"
+I_ACCT=$(as_owner "select id from public.accounts where user_id='$I' limit 1;" | tr -d ' \n\r')
+expect_deny "free-tier I cannot insert a csv_import-sourced trade" "$I" "insert into public.trades (user_id,account_id,symbol,direction,entry_price,size,entry_time,source) values ('$I',$I_ACCT,'CSV','long',100,1,now(),'csv_import');"
+expect_ok   "the same insert as source=manual succeeds (control)"  "$I" "insert into public.trades (user_id,account_id,symbol,direction,entry_price,size,entry_time,source) values ('$I',$I_ACCT,'MAN','long',100,1,now(),'manual');"
+
+echo
 echo "==> Storage (path-scoped, a different RLS mechanism)"
 # Checked as the DB owner: `authenticated` deliberately cannot read
 # storage.buckets at all (RLS on, no policies), so a client cannot enumerate
@@ -252,7 +264,14 @@ expect_ok   "an ordinary rename (no cap change) still works"  "$E" "update publi
 
 echo
 echo "==> push_subscriptions (M7b)"
+# This block tests shared-device reassignment mechanics, not entitlements —
+# the push_notifications plan flag has its own dedicated test below (M8c). F
+# and G are put on Pro here (as the DB owner; a user cannot do this to
+# themselves, see the "Reference data" block) purely so a free-tier gate
+# added later doesn't turn every assertion in this block into a false
+# failure of the wrong thing.
 F=$(mk_user "rls_f_$(date +%s)@journal4me.test")
+as_owner "insert into public.subscriptions (user_id,plan_id,status) values ('$F',(select id from public.plans where code='pro'),'active');" >/dev/null
 expect_ok   "F subscribes device 1"                     "$F" "select public.save_push_subscription('https://push.example/f1','p256dh-f1','auth-f1','Chrome/1');"
 expect_eq   "F sees exactly 1 subscription"              "$F" "select count(*) from public.push_subscriptions where user_id='$F';" "1"
 expect_ok   "F subscribes device 2 (a second device)"    "$F" "select public.save_push_subscription('https://push.example/f2','p256dh-f2','auth-f2','Safari/1');"
@@ -267,11 +286,23 @@ expect_eq   "B's DELETE against F's subscriptions hits 0" "$B" "with d as (delet
 # EXACT SAME endpoint F already registered (e.g. F signed out on a shared
 # laptop and G signed in). The row must reassign to G, not stay F's forever.
 G=$(mk_user "rls_g_$(date +%s)@journal4me.test")
+as_owner "insert into public.subscriptions (user_id,plan_id,status) values ('$G',(select id from public.plans where code='pro'),'active');" >/dev/null
 expect_ok   "G re-subscribes F's exact endpoint (shared device)" "$G" "select public.save_push_subscription('https://push.example/f1','p256dh-g','auth-g','Chrome/3');"
 expect_eq   "that row now belongs to G, not F"            "$G" "select user_id::text from public.push_subscriptions where endpoint='https://push.example/f1';" "$G"
 expect_eq   "F is left with only device 2"                "$F" "select count(*) from public.push_subscriptions where user_id='$F';" "1"
 expect_deny "G cannot hand its OWN row to a third user via a raw UPDATE" "$G" "update public.push_subscriptions set user_id='$B' where endpoint='https://push.example/f1';"
 expect_eq   "...the row is still G's after the attempt"   "$G" "select user_id::text from public.push_subscriptions where endpoint='https://push.example/f1';" "$G"
+
+echo
+echo "==> push_notifications plan flag (M8c)"
+# save_push_subscription() is SECURITY DEFINER and bypasses RLS entirely by
+# design, so this gate lives inside the function body (20260903180000) — a
+# denial here has to come from the function's own raised exception, not a
+# policy, which is exactly what the "Plan does not include" pattern above
+# exists to recognise.
+J=$(mk_user "rls_j_$(date +%s)@journal4me.test")
+expect_deny "free-tier J cannot enable push notifications" "$J" "select public.save_push_subscription('https://push.example/j1','p256dh-j1','auth-j1','Chrome/1');"
+expect_eq   "no subscription row was created"                "$J" "select count(*) from public.push_subscriptions where user_id='$J';" "0"
 
 echo
 echo "==> notifications (M7c)"
