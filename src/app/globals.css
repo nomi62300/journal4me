@@ -64,6 +64,13 @@
   --card-foreground: rgba(24, 24, 27, 1); /* fg-base */
   --popover: rgba(255, 255, 255, 1); /* bg-base */
   --popover-foreground: rgba(24, 24, 27, 1); /* fg-base */
+  /* THE BRAND COLOR. Every primary button (Button's `default` variant),
+     active sidebar-nav state and primary link in the app reads from
+     --primary/--primary-foreground — this pair, plus its .dark-block
+     counterpart below, is the one place to drop in a real brand hue later.
+     No brand color has been chosen yet (owner, 2026-09-03); these are
+     Medusa's neutral "inverted button" values, kept as a safe placeholder
+     until one is picked. */
   --primary: rgba(39, 39, 42, 1); /* button-inverted */
   --primary-foreground: rgba(255, 255, 255, 1); /* fg-on-inverted */
   --secondary: rgba(250, 250, 250, 1); /* bg-component */
@@ -85,7 +92,7 @@
   --radius: 0.5rem;
   --sidebar: rgba(255, 255, 255, 1); /* bg-base */
   --sidebar-foreground: rgba(24, 24, 27, 1); /* fg-base */
-  --sidebar-primary: rgba(39, 39, 42, 1); /* button-inverted */
+  --sidebar-primary: rgba(39, 39, 42, 1); /* button-inverted — same brand-color pair as --primary above */
   --sidebar-primary-foreground: rgba(255, 255, 255, 1); /* fg-on-inverted */
   --sidebar-accent: rgba(244, 244, 245, 1); /* bg-base-hover */
   --sidebar-accent-foreground: rgba(24, 24, 27, 1); /* fg-base */
@@ -111,7 +118,15 @@
   --card-foreground: rgba(244, 244, 245, 1); /* fg-base */
   --popover: rgba(33, 33, 36, 1); /* bg-base */
   --popover-foreground: rgba(244, 244, 245, 1); /* fg-base */
-  --primary: rgba(82, 82, 91, 1); /* button-inverted */
+  /* Fixed 2026-09-03: this was Medusa's literal "button-inverted" token,
+     copied verbatim, but rgba(82,82,91,1) is a mid-grey with genuinely low
+     contrast against this background — every primary CTA in the app (Save,
+     Create account, Sign up...) read as disabled in dark mode. An inverted
+     button should swap fg/bg, so this is now the same value as --foreground
+     below (light fill), paired with --primary-foreground already correctly
+     set to near-black text. See THE BRAND COLOR comment in :root above —
+     same token, change both together. */
+  --primary: rgba(244, 244, 245, 1); /* button-inverted, fixed for contrast */
   --primary-foreground: rgba(24, 24, 27, 1); /* fg-on-inverted */
   --secondary: rgba(39, 39, 42, 1); /* bg-component */
   --secondary-foreground: rgba(244, 244, 245, 1); /* fg-base */
@@ -141,7 +156,7 @@
   --chart-5: rgba(251, 113, 133, 1); /* tag-red-icon */
   --sidebar: rgba(33, 33, 36, 1); /* bg-base */
   --sidebar-foreground: rgba(244, 244, 245, 1); /* fg-base */
-  --sidebar-primary: rgba(82, 82, 91, 1); /* button-inverted */
+  --sidebar-primary: rgba(244, 244, 245, 1); /* button-inverted, fixed for contrast — same as --primary above */
   --sidebar-primary-foreground: rgba(24, 24, 27, 1); /* fg-on-inverted */
   --sidebar-accent: rgba(39, 39, 42, 1); /* bg-base-hover */
   --sidebar-accent-foreground: rgba(244, 244, 245, 1); /* fg-base */

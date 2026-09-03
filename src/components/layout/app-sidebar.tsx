@@ -7,6 +7,7 @@ import { LogOut } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NAV_ITEMS } from "@/components/layout/nav-items";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { signOut } from "@/lib/auth/actions";
 import { cn } from "@/lib/utils";
 
@@ -72,6 +73,7 @@ export function AppSidebar({ email }: { email: string | null }) {
           <span className="text-muted-foreground min-w-0 flex-1 truncate text-xs">
             {email ?? "Signed in"}
           </span>
+          <ThemeToggle />
         </div>
         <form action={signOut}>
           <Button

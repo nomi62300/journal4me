@@ -4,6 +4,66 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.0] — 2026-09-03
+
+### Added — M9a: design system fixes, Accounts IA, NY default
+- **`ThemeToggle`** (`src/components/layout/theme-toggle.tsx`) — the app had `next-themes` fully
+  wired since M0 (complete `.dark` CSS overrides, `attribute="class"`) but genuinely no UI
+  control anywhere to switch it; confirmed by grep before writing a line of code. Mounted in two
+  places: the sidebar footer (desktop) and a new "Appearance" card on `/settings`
+  (`src/components/settings/appearance-card.tsx`) — the sidebar is `hidden` below `md:`, so
+  Settings is the only place a mobile user (bottom-tab nav) can reach it at all.
+- **A real dark-mode contrast bug fixed at the token, not the component.** `.dark`'s `--primary`
+  / `--sidebar-primary` were a mid-grey (`rgba(82,82,91,1)`) copied verbatim from Medusa's admin
+  design system — against the dark background, every primary CTA in the app (Save, Create
+  account, Sign up...) read as disabled. Fixed to the inverse of `--foreground` instead
+  (`rgba(244,244,245,1)`, light fill + already-correct near-black text), which is what an
+  "inverted button" actually means going *into* dark mode. Zero component changes needed —
+  `Button`'s `default` variant already reads from this token, so the fix cascades everywhere.
+- **The brand-color architecture the owner asked for**: `--primary`/`--primary-foreground` (both
+  `:root` and `.dark`) are now explicitly commented as *the* brand-color token — one documented
+  place to drop in a real hue once one is chosen, rather than a color scattered across
+  components. No brand color has been picked yet; this only fixes the architecture and the
+  contrast bug, per the owner's own framing.
+- **Accounts split into Personal / Prop firm sub-tabs** (`src/app/(app)/accounts/page.tsx`),
+  reusing the existing `Tabs` primitive (confirmed present, confirmed unused elsewhere in the
+  app before this) and the unmodified `AccountCard` — filtered by the already-existing
+  `account_type` column, no schema change. Each tab keeps its own active/archived split.
+- **Trading-day reset now defaults to America/New_York**, not the browser's own timezone
+  (`src/components/accounts/account-wizard.tsx`). 5pm ET is the industry-standard forex
+  trading-day boundary and what nearly every prop firm resets daily-loss limits against — the
+  old default (silently guessing the visitor's own timezone) was frequently wrong for exactly
+  the accounts that matter most. Still freely overridable via the timezone combobox; the
+  now-dead `detectBrowserTimezone()` helper was removed rather than left unused. Updated the
+  field's own copy, which previously and now-inaccurately claimed to have "guessed your own
+  timezone."
+
+### Fixed
+- **A hydration-mismatch bug caught live, before it ever reached the owner**: `ThemeToggle`'s
+  first implementation read the resolved theme straight off `useTheme()`, on the assumption
+  (documented, and wrong) that it's reliably `undefined` before mount. It isn't —
+  next-themes' anti-flash inline script sets the real value synchronously before hydration, so
+  the client's first paint could already resolve to e.g. "light" while the server (no
+  `localStorage` access) always renders as unset. Server sent the Monitor/System icon, client
+  hydrated straight to Sun, React threw a real hydration-mismatch error on every single page
+  load. Fixed with the standard `mounted`-gate pattern — both server and the client's *first*
+  render now agree on `mounted=false` regardless of the real theme, with the correct icon
+  swapping in only after that first paint commits. Same microtask-yield shape
+  `push-settings.tsx` already established for its own browser-only detection, kept consistent.
+
+### Verified live
+`npx tsc --noEmit` clean, `npm run lint` clean (only the pre-existing unrelated
+`account-wizard.tsx` warning), `npm run test:rls` and `npm run test:prop` unaffected at
+101/101 and 134/134 (no schema touched this milestone). Signed up fresh, watched the dark-mode
+"Create account" button visibly go from disabled-looking grey to a correct high-contrast white
+button. Confirmed the hydration error via the dev server's own logs (a real stack trace naming
+`ThemeToggle`, `Sun` vs `Monitor`, `lucide-sun` vs `lucide-monitor`) before fixing it, then
+confirmed a clean log tail after — not just "the page looks fine." Verified the theme toggle
+from both mount points (sidebar dropdown: Light/Dark/System; Settings card), the NY default
+live in a real wizard run with its updated copy, and the Accounts tabs with one personal and
+one prop firm account, correctly filtered and counted, including a 375px mobile pass on both
+Accounts and Settings.
+
 ## [0.30.0] — 2026-09-03
 
 ### Added — M8c: the commercial surface

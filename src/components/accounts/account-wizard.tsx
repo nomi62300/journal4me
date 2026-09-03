@@ -108,14 +108,6 @@ const STEP_FIELDS: (keyof WizardInput)[][] = [
   [],
 ];
 
-function detectBrowserTimezone(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  } catch {
-    return "UTC";
-  }
-}
-
 export function AccountWizard({ entitlements }: { entitlements: Entitlements }) {
   const [step, setStep] = useState(0);
   const [pending, startTransition] = useTransition();
@@ -132,7 +124,12 @@ export function AccountWizard({ entitlements }: { entitlements: Entitlements }) 
       asset_classes: [],
       starting_balance: 0,
       currency: "USD",
-      reset_timezone: detectBrowserTimezone(),
+      // New York, not the browser's own timezone: 5pm ET is the
+      // industry-standard forex trading-day boundary (what most brokers'
+      // own "trading day" convention already uses), and it's also what
+      // nearly every prop firm resets daily-loss limits against. Still
+      // freely overridable via the combobox below.
+      reset_timezone: "America/New_York",
       reset_time: "00:00",
       day_label_offset: 0,
       daily_loss_limit_type: "",
@@ -455,17 +452,17 @@ export function AccountWizard({ entitlements }: { entitlements: Entitlements }) 
                   {isProp ? (
                     <>
                       Your firm&rsquo;s daily-loss limits reset at THEIR
-                      clock, not yours. We&rsquo;ve guessed your own timezone
-                      as a starting point —{" "}
+                      clock, not yours. Defaulted to New York, since that&rsquo;s
+                      what most firms reset against —{" "}
                       <strong>check your firm&rsquo;s rules or platform</strong>{" "}
                       for the real reset time before relying on this.
                     </>
                   ) : (
                     <>
                       This decides which calendar day a trade counts toward in
-                      your journal. We&rsquo;ve guessed your own timezone —
-                      change it if your broker&rsquo;s server runs on a
-                      different one.
+                      your journal. Defaulted to New York — the standard
+                      forex trading-day boundary — change it if your
+                      broker&rsquo;s server runs on a different one.
                     </>
                   )}
                 </FieldDescription>
