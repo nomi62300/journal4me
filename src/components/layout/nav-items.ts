@@ -27,7 +27,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/trades", label: "Trades", icon: LineChart, mobile: true },
   { href: "/journal", label: "Journal", icon: BookOpen, mobile: true, comingSoon: true },
   { href: "/strategies", label: "Strategies", icon: Target, comingSoon: true },
-  { href: "/analytics", label: "Analytics", icon: BarChart3, comingSoon: true },
+  { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/notifications", label: "Notifications", icon: Bell, comingSoon: true },
   { href: "/settings", label: "Settings", icon: Settings, mobile: true, comingSoon: true },
 ];

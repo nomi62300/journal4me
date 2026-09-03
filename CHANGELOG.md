@@ -4,6 +4,41 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] — 2026-09-03
+
+### Added — M5 (part 2): the metric layer and `/analytics`
+- `src/lib/analytics/metrics.ts` — pure, framework-free functions for net P&L, win rate,
+  profit factor, expectancy in R, avg/largest win/loss, current streak, R-multiple
+  distribution, symbol/strategy/weekday/hour breakdowns, MAE/MFE points, and the
+  equity/drawdown-from-peak curve. Verified against 35 hand-computed fixtures covering the
+  awkward cases the build plan specifically calls out: zero losses (profit factor `null`, not
+  `Infinity` or a fabricated number), a single trade, an empty account, a streak-ending
+  breakeven, and R-multiple's null-vs-zero distinction (a trade with no stop is excluded from
+  the expectancy average, never counted as 0R).
+- `buildEquityCurve()` recomputes running balance and drawdown-from-peak fresh from
+  `daily_summaries` on every call — nothing is stored, per the standing "never store a
+  path-dependent value" rule. `daily_summaries` itself already stays correct via M5 part 1's
+  triggers, so this stays cheap and always current.
+- `/analytics` — KPI row, equity + drawdown charts, an R-multiple histogram, an MAE/MFE
+  scatter ("was my stop too tight?"), and net-P&L breakdowns by symbol/strategy/weekday/hour,
+  scoped to one account at a time (an equity curve is a property of a single account's
+  balance — there's no safe "all accounts" merge the way the dashboard's independent P&L
+  totals allow). Nav's `comingSoon` flag removed.
+- Charts use Recharts (via `shadcn add chart`, already wired to this app's theme), not
+  TradingView Lightweight Charts as the original build plan named for equity/drawdown — a
+  deliberate scope call: at this product's data scale (hundreds of day-rows, not tick data)
+  Lightweight Charts' pan/zoom-at-scale advantage doesn't apply, and a second charting
+  dependency plus its Apache-2.0 attribution requirement wasn't worth it for no real gain.
+- Live-verified against 40 seeded demo trades (34 closed, spanning 26 trading days): every KPI
+  cross-checked by hand (weekday breakdown rows summed to the exact net P&L total), all four
+  breakdown tabs, both charts, the R-histogram's red/green bucket coloring, the MAE/MFE
+  empty state, and desktop/mobile/light/dark rendering.
+
+### Fixed — found live
+Current-streak copy read "2 wines" instead of "2 wins" — a shared `${word}${count === 1 ? "" : "es"}`
+suffix assumed both "win" and "loss" pluralize with "-es"; only "loss" does. Fixed by giving
+each word its own suffix.
+
 ## [0.19.0] — 2026-09-03
 
 ### Added — M5 (part 1): `daily_summaries` and its re-aggregation triggers
